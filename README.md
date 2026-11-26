@@ -33,6 +33,19 @@ before giving up. If it still cannot find one, the cat says so and offers **"Cho
 in its menu; the chosen path is remembered. It also keeps retrying every 30 s, so installing Rex
 afterwards just starts working.
 
+## Install
+
+Download `RexPet-<version>.zip` from [releases](https://github.com/ziludev/rex-pet/releases) and
+drag the app to `/Applications`.
+
+It is ad-hoc signed, not notarized, so the first launch needs one of:
+
+- right-click the app and choose **Open**, then **Open** again, or
+- `xattr -dr com.apple.quarantine /Applications/RexPet.app`
+
+Launching from `/Applications` is also what makes **Launch at login** work — the service refuses to
+register a bundle that lives in a build directory.
+
 ## Build and run
 
 ```sh
@@ -44,6 +57,9 @@ REX_PET_DEBUG=1 ./build/RexPet.app/Contents/MacOS/RexPet   # logs clicks and sen
 
 The bundle is ad-hoc signed (`codesign --force --sign -`), which is enough to run locally and keeps
 the TCC identity stable across rebuilds. There is no notarized binary yet.
+
+`tools/release.sh` builds the universal app, runs the checks, and writes `build/RexPet-<version>.zip`
+plus its SHA-256 — that is exactly what a release uploads.
 
 ## Using it
 
