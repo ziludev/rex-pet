@@ -91,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func buildPanel() {
         panel = PetPanel(frame: NSRect(origin: restoreOrigin(), size: panelSize))
         petView = PetView(frame: NSRect(origin: .zero, size: panelSize))
+        petView.onLog = { [weak self] message in self?.debugLog(message) }
         petView.onClick = { [weak self] in self?.handlePetClick() }
         petView.onRightClick = { [weak self] in self?.showMenu() }
         petView.onDragEnd = { origin in
@@ -328,22 +329,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return
         }
-        applyFileOverride()
+        // A fresh file override owns the pet for its whole TTL: letting events
+        // through between polls makes state flip-flop and rebuild the player.
+        guard !applyFileOverride() else { return }
         expireStaleStates()
     }
 
     /// A state file written in the last `overrideTTL` wins over the event stream:
     /// that keeps the demo/hand-test path usable while a busy pane keeps emitting
     /// events every few hundred milliseconds.
-    private func applyFileOverride() {
-        guard let mtime = stateFileMTime(), Date().timeIntervalSince(mtime) < Self.overrideTTL else { return }
+    @discardableResult
+    private func applyFileOverride() -> Bool {
+        guard let mtime = stateFileMTime(), Date().timeIntervalSince(mtime) < Self.overrideTTL else { return false }
         let loaded = PetContext.load()
-        guard loaded.state != context.state || loaded.blockID != context.blockID else { return }
-        context.blockID = loaded.blockID
-        context.title = loaded.title
-        machine.reset()
-        debugLog("file state=\(loaded.state.rawValue)")
-        apply(loaded.state)
+        if loaded.state != context.state || loaded.blockID != context.blockID {
+            context.blockID = loaded.blockID
+            context.title = loaded.title
+            machine.reset()
+            debugLog("file state=\(loaded.state.rawValue)")
+            apply(loaded.state)
+        }
+        return true
     }
 
     private func stateFileMTime() -> Date? {

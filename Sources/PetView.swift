@@ -1,18 +1,21 @@
 import AppKit
+import AVFoundation
 import ImageIO
 
 /// Draws the pet plus an optional speech bubble, and handles drag / click.
 ///
-/// Two render modes:
-/// 1. The vector cat from `CatSprite`, animated in code (default).
-/// 2. Sprite frames from `~/Library/Application Support/rex-pet/Assets/<state>/*.png`,
-///    played at 12 fps. If a state has frames on disk they win, so generated art
-///    can be dropped in later without touching this file.
+/// Three render modes, in this order of preference:
+/// 1. An HEVC-with-alpha clip at `~/Library/Application Support/rex-pet/Assets/<state>.mov`
+///    (what `tools/make-pet.sh` produces), looped by AVPlayer.
+/// 2. Sprite frames from `.../Assets/<state>/*.png`, played at 12 fps.
+/// 3. The vector cat from `CatSprite`, animated in code (default).
+///
+/// Generated art therefore wins over the built-in cat without touching this file.
 final class PetView: NSView {
     var petState: PetState = .idle {
         didSet {
             guard petState != oldValue else { return }
-            loadFrames()
+            loadAsset()
             needsDisplay = true
         }
     }
@@ -21,6 +24,7 @@ final class PetView: NSView {
         didSet { needsDisplay = true }
     }
 
+    var onLog: ((String) -> Void)?
     var onClick: (() -> Void)?
     var onRightClick: (() -> Void)?
     var onDragEnd: ((NSPoint) -> Void)?
@@ -30,6 +34,10 @@ final class PetView: NSView {
     private let frameInterval: CFTimeInterval = 1.0 / 12.0
 
     private var frames: [CGImage] = []
+    private var moviePlayer: AVQueuePlayer?
+    private var movieLooper: AVPlayerLooper?
+    private var movieLayer: AVPlayerLayer?
+    private var loadedMovieURL: URL?
     private var frameIndex = 0
     private var lastFrameSwap: CFTimeInterval = 0
     private var ticker: Timer?
@@ -44,20 +52,35 @@ final class PetView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         startTicking()
-        loadFrames()
+        loadAsset()
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    deinit { ticker?.invalidate() }
+    deinit {
+        ticker?.invalidate()
+        moviePlayer?.pause()
+    }
 
     private func startTicking() {
         // .common mode keeps the animation alive while a drag tracking loop runs.
         let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             self?.needsDisplay = true
+            self?.reportPlayback()
         }
         RunLoop.main.add(timer, forMode: .common)
         ticker = timer
+    }
+
+    private var lastPlaybackReport: CFTimeInterval = 0
+
+    /// One line every two seconds: enough to prove the clip is really running.
+    private func reportPlayback() {
+        guard let player = moviePlayer, let onLog else { return }
+        let now = CACurrentMediaTime()
+        guard now - lastPlaybackReport > 2 else { return }
+        lastPlaybackReport = now
+        onLog("movie rate=\(player.rate) t=\(String(format: "%.2f", player.currentTime().seconds))")
     }
 
     // MARK: - Layout
@@ -71,7 +94,8 @@ final class PetView: NSView {
     }
 
     private var hitRegion: NSRect {
-        var region = petRect.insetBy(dx: 18, dy: 18)
+        // Generated clips carry their own empty margin, so be forgiving.
+        var region = petRect.insetBy(dx: movieLayer == nil ? 18 : 34, dy: movieLayer == nil ? 18 : 34)
         if bubbleText != nil { region = region.union(bubbleRect) }
         return region
     }
@@ -84,6 +108,8 @@ final class PetView: NSView {
     }
 
     private func drawPet() {
+        // The movie draws itself through its layer; anything here would paint over it.
+        if movieLayer != nil { return }
         if !frames.isEmpty {
             drawSprite()
             return
@@ -128,12 +154,67 @@ final class PetView: NSView {
 
     // MARK: - Assets
 
+    private var assetBase: URL {
+        URL(fileURLWithPath: ("~/Library/Application Support/rex-pet/Assets" as NSString).expandingTildeInPath)
+    }
+
+    private func loadAsset() {
+        loadFrames()
+        loadMovie()
+    }
+
+    /// A state's own clip beats its frame folder: one file, 24–30 fps, no decode cost per frame.
+    private func loadMovie() {
+        let candidates = [
+            assetBase.appendingPathComponent("\(petState.rawValue).mov"),
+            assetBase.appendingPathComponent("mov/\(petState.rawValue).mov"),
+            assetBase.appendingPathComponent("\(petState.rawValue)/loop.mov"),
+        ]
+        let found = candidates.first { FileManager.default.fileExists(atPath: $0.path) }
+        guard found != loadedMovieURL else { return }
+
+        teardownMovie()
+        guard let url = found else { return }
+
+        let item = AVPlayerItem(url: url)
+        let player = AVQueuePlayer()
+        player.isMuted = true
+        let looper = AVPlayerLooper(player: player, templateItem: item)
+
+        let layer = AVPlayerLayer(player: player)
+        layer.videoGravity = .resizeAspect
+        layer.backgroundColor = NSColor.clear.cgColor
+        layer.isOpaque = false
+        layer.frame = petRect
+        self.layer?.addSublayer(layer)
+
+        moviePlayer = player
+        movieLooper = looper
+        movieLayer = layer
+        loadedMovieURL = url
+        player.play()
+        onLog?("movie \(url.lastPathComponent) at \(layer.frame.size)")
+    }
+
+    private func teardownMovie() {
+        moviePlayer?.pause()
+        movieLayer?.removeFromSuperlayer()
+        moviePlayer = nil
+        movieLooper = nil
+        movieLayer = nil
+        loadedMovieURL = nil
+    }
+
+    override func layout() {
+        super.layout()
+        movieLayer?.frame = petRect
+    }
+
     private func loadFrames() {
         frames = []
         frameIndex = 0
 
-        let base = ("~/Library/Application Support/rex-pet/Assets" as NSString).expandingTildeInPath
-        let dir = URL(fileURLWithPath: base).appendingPathComponent(petState.rawValue)
+        let dir = assetBase.appendingPathComponent(petState.rawValue)
         guard let files = try? FileManager.default.contentsOfDirectory(
             at: dir,
             includingPropertiesForKeys: nil

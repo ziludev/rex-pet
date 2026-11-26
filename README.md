@@ -131,9 +131,25 @@ your panes, the cat is amber — that is a report, not a bug.
 | --- | --- |
 | `~/.cache/rex-pet/state` | manual override: `idle` / `working` / `blocked` / `done` / `error`, wins over the event stream for 60 s after it is written |
 | `~/.cache/rex-pet/context.json` | same, plus `{"block":"block:…","title":"…"}` so a demo click has somewhere to reply |
-| `~/Library/Application Support/rex-pet/Assets/<state>/*.png` | optional image sequence, 12 fps; if present it replaces the vector cat |
+| `~/Library/Application Support/rex-pet/Assets/<state>.mov` | optional clip with alpha, looped; beats frames and the vector cat |
+| `~/Library/Application Support/rex-pet/Assets/<state>/*.png` | optional image sequence, 12 fps; beats the vector cat |
 
-`REX_PET_REX_BIN` overrides the `rex` lookup, `REX_PET_DEBUG=1` logs to stderr.
+`REX_PET_REX_BIN` overrides the `rex` lookup, `REX_PET_LANG=en|zh` overrides the UI language,
+`REX_PET_DEBUG=1` logs to stderr.
+
+## Your own art
+
+The built-in cat is drawn in code, but any state can be replaced by a clip you generate:
+a green-screen video in, one HEVC-with-alpha `.mov` out.
+
+```
+tools/make-pet.sh working ~/clip.mp4          # → build/assets/working.mov
+cp build/assets/working.mov ~/Library/Application\ Support/rex-pet/Assets/
+```
+
+`make-pet.sh` keys out the green, crops and scales to the window, and encodes alpha that AVPlayer
+plays natively. Prompt recipes and the full pipeline this borrows from live in
+[dsh-pet](https://github.com/PC2005-cloud/dsh-pet) (MIT); see [docs/MAKE-YOUR-OWN-PET.md](docs/MAKE-YOUR-OWN-PET.md).
 `tools/render-states.swift`, `tools/render-demo.swift` and `tools/render-icon.swift` regenerate
 `docs/states.png`, `docs/demo.gif` and the app icon from the real drawing code, so the README can
 never drift from the app. `tools/style-cat.swift` is the sketch pad where the look was designed.
@@ -159,11 +175,13 @@ never drift from the app. `tools/style-cat.swift` is the sketch pad where the lo
 - [cheap-rex-display](https://github.com/yethranayeh/cheap-rex-display) — the same idea on an ESP32 desk display
 - [rexq](https://github.com/tfcace/rexq) — floating inbox for questions and decisions from agents
 - [Rex's Tail](https://github.com/travelingflwr/rex-tail) — a panel beside Rex showing agent activity
+- [dsh-pet](https://github.com/PC2005-cloud/dsh-pet) — the browser pet this borrows its art pipeline from
 - [awesome-rex](https://github.com/alpha-og/awesome-rex) — the list all of the above live in
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE). `tools/hevc-alpha-encoder.swift` is adapted from the
+[dsh-pet](https://github.com/PC2005-cloud/dsh-pet) / sunkeycn encoder (MIT).
 
 Rex and Rexie are trademarks of Superlogical. This project is unofficial and not affiliated with or
 endorsed by Superlogical; the cat is original artwork drawn in code, not Rex's mascot.
