@@ -18,7 +18,7 @@ beside the window, even an ESP32 desk display — and floating inboxes that let 
 agent. They all want a glance, a list, or a pane.
 
 Rex Pet is the ambient one. A creature sits in the corner of the screen, says what is happening with
-colour alone, and answers in one click: hit **Allow (y)** on the cat and the answer goes straight into
+colour alone, and answers in one click: hit **Allow (y)** on the pet and the answer goes straight into
 the blocked pane. No list, no window to open, nothing to keep an eye on.
 
 ## Requirements
@@ -31,7 +31,7 @@ the blocked pane. No list, no window to open, nothing to keep an eye on.
 
 A GUI-launched app inherits launchd's minimal `PATH`, so the pet looks for `rex` in the usual install
 locations (`/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`, …) and inside the Rex app itself
-before giving up. If it still cannot find one, the cat says so and offers **"Choose the rex binary…"**
+before giving up. If it still cannot find one, the pet says so and offers **"Choose the rex binary…"**
 in its menu; the chosen path is remembered. It also keeps retrying every 30 s, so installing Rex
 afterwards just starts working.
 
@@ -65,12 +65,12 @@ plus its SHA-256 — that is exactly what a release uploads.
 
 ## Using it
 
-- **The cat is the only clickable part.** Everywhere else in its window, clicks fall through to
+- **The pet is the only clickable part.** Everywhere else in its window, clicks fall through to
   whatever is underneath: the window polls the mouse position at 20 Hz and flips
   `ignoresMouseEvents`, which needs no accessibility permission.
 - **Left click** — idle/working: a bubble naming the state and the pane. Blocked: the reply panel.
 - **Drag** — moves the window; the position is remembered in `UserDefaults`.
-- **Menu bar cat** — set a state, demo mode, toggle click-through, reset position, reply to the
+- **Menu bar icon** — set a state, demo mode, toggle click-through, reset position, reply to the
   blocked pane, pick the `rex` binary, launch at login, quit. The same menu is on a right click.
   The menu bar glyph is a template image, so it follows the light/dark menu bar.
 
@@ -105,7 +105,7 @@ rex block call -b <block> write '{"data":"y\r"}'
 | `done` | arms up, stars around her | green halo, `✓` badge | a command finished, cleared or not |
 | `error` | magenta halo, `×` badge | a command exited non-zero |
 
-The body is never tinted: the halo and the badge carry the state, so the cat stays one coherent
+The body is never tinted: the halo and the badge carry the state, so the pet stays one coherent
 character. On light wallpapers the silhouette survives thanks to a soft drop shadow and a 1.2 pt
 translucent outline.
 
@@ -140,8 +140,8 @@ erase the check mark before anyone sees it, and a busy pane in another window wo
 `done`. So `PetStateMachine` keeps one entry per block, shows the highest priority among them, holds
 `done`/`error` for 8 s, and drops `working` after 15 s without a refresh.
 
-Honest consequence: any pane reporting `working` keeps the cat amber. While an agent runs in one of
-your panes, the cat is amber — that is a report, not a bug.
+Honest consequence: any pane reporting `working` keeps the pet amber. While an agent runs in one of
+your panes, the pet is amber — that is a report, not a bug.
 
 ## Files it reads and writes
 
