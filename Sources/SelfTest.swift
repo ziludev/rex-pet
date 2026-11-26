@@ -63,6 +63,12 @@ enum SelfTest {
         machine.apply(update(.error, "block:b"), now: start + 1)
         expect(machine.snapshot(now: start + 2).state == .error, "error outranks done")
 
+        // A blocked pane that exits must not leave the cat red forever.
+        machine.reset()
+        machine.apply(update(.blocked, "block:a"), now: start)
+        machine.apply(update(.idle, "block:a"), now: start + 1)
+        expect(machine.snapshot(now: start + 2).state == .idle, "idle clears blocked")
+
         // An idle-only world is idle, and carries no pane.
         machine.reset()
         machine.apply(update(.idle, "block:a"), now: start)
@@ -78,10 +84,14 @@ enum SelfTest {
 
     private static func language() {
         // Forced by the environment, which is what the screenshots rely on.
-        expect(L10n.t("Allow (y)", "允许 (y)").isEmpty == false, "translation returns text")
-        let chinese = ProcessInfo.processInfo.environment["REX_PET_LANG"]?.hasPrefix("zh") ?? false
-        let expected = chinese ? "允许 (y)" : "Allow (y)"
-        expect(L10n.t("Allow (y)", "允许 (y)") == expected, "REX_PET_LANG=\(chinese ? "zh" : "en") picks the matching string")
+        let text = L10n.t("Allow (y)", "允许 (y)")
+        if let forced = ProcessInfo.processInfo.environment["REX_PET_LANG"], !forced.isEmpty {
+            let expected = forced.lowercased().hasPrefix("zh") ? "允许 (y)" : "Allow (y)"
+            expect(text == expected, "REX_PET_LANG=\(forced) picks that language")
+        } else {
+            // Whatever the machine prefers, it has to be one of the two known strings.
+            expect(text == "Allow (y)" || text == "允许 (y)", "an unforced language still resolves")
+        }
     }
 
     // MARK: - Plumbing

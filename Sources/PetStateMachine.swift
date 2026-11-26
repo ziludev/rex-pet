@@ -43,8 +43,12 @@ final class PetStateMachine {
         case .idle:
             // Shells emit `idle` right after `child_exited`; dropping the entry here
             // would erase the check mark before anyone sees it, so `done`/`error`
-            // is left to expire on its own TTL.
-            if entries[key]?.state == .working { entries[key] = nil }
+            // is left to expire on its own TTL. Anything else means the pane stopped:
+            // a `blocked` pane that no longer exists would leave the cat red forever.
+            switch entries[key]?.state {
+            case .working, .blocked: entries[key] = nil
+            default: break
+            }
             return
 
         case .working:
