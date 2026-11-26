@@ -134,6 +134,9 @@ your panes, the cat is amber — that is a report, not a bug.
 | `~/Library/Application Support/rex-pet/Assets/<state>.mov` | optional clip with alpha, looped; beats frames and the vector cat |
 | `~/Library/Application Support/rex-pet/Assets/<state>/*.png` | optional image sequence, 12 fps; beats the vector cat |
 
+`./build/RexPet.app/Contents/MacOS/RexPet --selftest` runs the headless checks (state aggregation,
+language switch) and exits non-zero on failure; CI runs exactly that.
+
 `REX_PET_REX_BIN` overrides the `rex` lookup, `REX_PET_LANG=en|zh` overrides the UI language,
 `REX_PET_DEBUG=1` logs to stderr.
 
