@@ -130,14 +130,22 @@ final class ReplyPanel: NSPanel, NSTextFieldDelegate {
 
     // MARK: - Actions
 
-    @objc private func quickReply(_ sender: NSButton) {
-        switch sender.tag {
-        case 0: send("y\r")
-        case 1: send("1\r")
-        case 2: send("n\r")
-        case 3: send("\u{03}")
-        default: break
+    /// Raw bytes a button sends to the pane. Kept separate from the button
+    /// wiring so `--selftest` can assert them: a wrong \r means a pane that
+    /// silently ignores the answer.
+    static func payload(forTag tag: Int) -> String? {
+        switch tag {
+        case 0: return "y\r"
+        case 1: return "1\r"
+        case 2: return "n\r"
+        case 3: return "\u{03}"
+        default: return nil
         }
+    }
+
+    @objc private func quickReply(_ sender: NSButton) {
+        guard let payload = ReplyPanel.payload(forTag: sender.tag) else { return }
+        send(payload)
     }
 
     @objc private func submitField() {

@@ -13,6 +13,7 @@ enum SelfTest {
 
     static func run() -> Int32 {
         stateMachine()
+        replies()
         language()
         print("\(checks - failures)/\(checks) checks passed")
         return failures == 0 ? 0 : 1
@@ -81,6 +82,24 @@ enum SelfTest {
     }
 
     // MARK: - Language
+
+    // MARK: - What a click actually sends
+
+    private static func replies() {
+        expect(ReplyPanel.payload(forTag: 0) == "y\r", "the allow button answers y")
+        expect(ReplyPanel.payload(forTag: 2) == "n\r", "the deny button answers n")
+        expect(ReplyPanel.payload(forTag: 1) == "1\r", "the middle button picks 1")
+        expect(ReplyPanel.payload(forTag: 3) == "\u{03}", "the interrupt button sends ctrl-c")
+        expect(ReplyPanel.payload(forTag: 9) == nil, "an unknown button sends nothing")
+
+        // Typed answers go through JSON, so quotes and backslashes must survive.
+        let awkward = "say \"hello\" \\ ok"
+        let payload = RexBridge.jsonPayload(data: awkward)
+        let decoded = payload
+            .flatMap { $0.data(using: .utf8) }
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: String] }
+        expect(decoded?["data"] == awkward, "a typed answer with quotes round-trips through the CLI payload")
+    }
 
     private static func language() {
         // Forced by the environment, which is what the screenshots rely on.

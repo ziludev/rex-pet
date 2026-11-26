@@ -78,6 +78,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lastEventAt = Date()
         debugLog("event \(update.state.rawValue) block=\(update.blockID ?? "-")")
         machine.apply(update)
+        // A fresh state file outranks the stream, here too: applying the stream
+        // directly is what made the pet flip between two states every event.
+        guard !applyFileOverride() else { return }
         syncFromMachine()
     }
 

@@ -34,6 +34,10 @@ final class PetView: NSView {
     private let frameInterval: CFTimeInterval = 1.0 / 12.0
 
     private var frames: [CGImage] = []
+    /// Clips AVPlayer refuses to open are remembered, so a bad file in Assets
+    /// falls back to the drawn cat instead of retrying on every state change.
+    private var failedMovies: Set<URL> = []
+    private var itemObservation: NSKeyValueObservation?
     private var moviePlayer: AVQueuePlayer?
     private var movieLooper: AVPlayerLooper?
     private var movieLayer: AVPlayerLayer?
@@ -73,6 +77,8 @@ final class PetView: NSView {
     }
 
     private var lastPlaybackReport: CFTimeInterval = 0
+    private var lastMovieTime: Double = -1
+    private var stalledReports = 0
 
     /// One line every two seconds: enough to prove the clip is really running.
     private func reportPlayback() {
@@ -80,7 +86,25 @@ final class PetView: NSView {
         let now = CACurrentMediaTime()
         guard now - lastPlaybackReport > 2 else { return }
         lastPlaybackReport = now
-        onLog("movie rate=\(player.rate) t=\(String(format: "%.2f", player.currentTime().seconds))")
+        let time = player.currentTime().seconds
+        onLog("movie rate=\(player.rate) t=\(String(format: "%.2f", time))")
+
+        // A file can open and still never advance — a truncated download or a
+        // codec macOS has no decoder for. Two reports without progress is enough
+        // to stop trusting it; the drawn cat covers the state from then on.
+        if time.isNaN || time == lastMovieTime {
+            stalledReports += 1
+        } else {
+            stalledReports = 0
+        }
+        lastMovieTime = time
+        if stalledReports >= 2, let url = loadedMovieURL {
+            onLog("clip \(url.lastPathComponent) is not playing; falling back")
+            failedMovies.insert(url)
+            stalledReports = 0
+            teardownMovie()
+            needsDisplay = true
+        }
     }
 
     // MARK: - Layout
@@ -187,6 +211,8 @@ final class PetView: NSView {
         teardownMovie()
         guard let url = found else { return }
 
+        guard !failedMovies.contains(url) else { return }
+
         let item = AVPlayerItem(url: url)
         let player = AVQueuePlayer()
         player.isMuted = true
@@ -199,6 +225,19 @@ final class PetView: NSView {
         layer.frame = petRect
         self.layer?.addSublayer(layer)
 
+        // A clip can be present and still unplayable (truncated download, a codec
+        // this Mac has no decoder for). Say so and let the drawn cat take over.
+        itemObservation = item.observe(\.status) { [weak self] item, _ in
+            guard item.status == .failed else { return }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.onLog?("cannot play \(url.lastPathComponent): \(item.error?.localizedDescription ?? "unknown")")
+                self.failedMovies.insert(url)
+                self.teardownMovie()
+                self.needsDisplay = true
+            }
+        }
+
         moviePlayer = player
         movieLooper = looper
         movieLayer = layer
@@ -208,6 +247,7 @@ final class PetView: NSView {
     }
 
     private func teardownMovie() {
+        itemObservation = nil
         moviePlayer?.pause()
         movieLayer?.removeFromSuperlayer()
         moviePlayer = nil

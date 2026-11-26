@@ -104,7 +104,9 @@ enum RexBridge {
         }
     }
 
-    private static func jsonPayload(data: String) -> String? {
+    /// Also used by `--selftest`: the escaping here is the only thing between
+    /// typed text and a broken `rex block call`.
+    static func jsonPayload(data: String) -> String? {
         guard let encoded = try? JSONSerialization.data(withJSONObject: ["data": data]) else { return nil }
         return String(data: encoded, encoding: .utf8)
     }
