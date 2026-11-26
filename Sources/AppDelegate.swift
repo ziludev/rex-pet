@@ -37,6 +37,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startWatcher()
         startPolling()
         installClickThroughMonitor()
+        NotificationCenter.default.addObserver(self, selector: #selector(screensChanged),
+                                              name: NSApplication.didChangeScreenParametersNotification,
+                                              object: nil)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -94,11 +97,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         petView.onLog = { [weak self] message in self?.debugLog(message) }
         petView.onClick = { [weak self] in self?.handlePetClick() }
         petView.onRightClick = { [weak self] in self?.showMenu() }
-        petView.onDragEnd = { origin in
-            UserDefaults.standard.set("\(origin.x),\(origin.y)", forKey: "petOrigin")
+        petView.onDragEnd = { [weak self] origin in
+            guard let self else { return }
+            let fixed = clampOrigin(origin)
+            panel.setFrameOrigin(fixed)
+            UserDefaults.standard.set("\(fixed.x),\(fixed.y)", forKey: "petOrigin")
         }
         panel.contentView = petView
         panel.orderFrontRegardless()
+    }
+
+    /// Keeps the cat reachable: a display that was unplugged, or a window dragged
+    /// past the edge, must not strand it where nobody can see or click it.
+    private func clampOrigin(_ origin: NSPoint) -> NSPoint {
+        var rect = NSRect(origin: origin, size: panelSize)
+        let reachable = NSScreen.screens.map { $0.visibleFrame.insetBy(dx: -40, dy: -40) }
+        guard !reachable.contains(where: { $0.intersects(rect) }) else { return origin }
+        // Off every screen: put it back on the primary one, bottom right.
+        let home = NSScreen.screens.first?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        rect.origin = NSPoint(x: home.maxX - panelSize.width - 40, y: home.minY + 60)
+        return rect.origin
+    }
+
+    /// Displays come and go; without this the cat can end up on a screen that no
+    /// longer exists and looks like a crash to the user.
+    @objc private func screensChanged() {
+        guard panel.frame.size != .zero else { return }
+        let fixed = clampOrigin(panel.frame.origin)
+        if fixed != panel.frame.origin {
+            panel.setFrameOrigin(fixed)
+            UserDefaults.standard.set("\(fixed.x),\(fixed.y)", forKey: "petOrigin")
+            debugLog("screen change: pet moved to \(fixed)")
+        }
     }
 
     private func restoreOrigin() -> NSPoint {
