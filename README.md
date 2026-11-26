@@ -1,10 +1,11 @@
 # Rex Pet
 
 An unofficial, ambient desktop pet for [Rex](https://superlogical.com), the terminal workspace
-by Superlogical. A transparent cat sits on your desktop, mirrors what your agent panes are doing,
-and — when one of them is blocked waiting for you — lets you answer without switching panes.
+by Superlogical. A small character sits in the corner of your desktop, mirrors what your agent panes
+are doing, and — when one of them is blocked waiting for you — lets you answer without switching
+panes.
 
-![Every state, drawn by the app itself](docs/demo.gif)
+![One clip per state](docs/demo.gif)
 
 Zero dependencies: plain AppKit, no Xcode project, no third-party packages. `./build.sh` and you have
 an `.app`. The character is a whale girl, art from [dsh-pet](https://github.com/PC2005-cloud/dsh-pet)
@@ -96,12 +97,12 @@ rex block call -b <block> write '{"data":"y\r"}'
 
 ![states](docs/states.png)
 
-| State | Look | Meaning |
-| --- | --- | --- |
-| `idle` | no halo | nothing is running |
-| `working` | amber halo, `~` badge | at least one pane is busy |
-| `blocked` | red halo, `!` badge, no blinking | a pane wants permission or an answer |
-| `done` | green halo, `✓` badge | a command finished, cleared or not |
+| State | The clip shows | The drawn cat shows | Meaning |
+| --- | --- | --- | --- |
+| `idle` | a breathing loop | no halo | nothing is running |
+| `working` | typing at a tiny laptop | amber halo, `~` badge | at least one pane is busy |
+| `blocked` | slapping the floor with her tail | red halo, `!` badge, no blinking | a pane wants permission or an answer |
+| `done` | arms up, stars around her | green halo, `✓` badge | a command finished, cleared or not |
 | `error` | magenta halo, `×` badge | a command exited non-zero |
 
 The body is never tinted: the halo and the badge carry the state, so the cat stays one coherent
@@ -170,9 +171,10 @@ cp build/assets/working.mov ~/Library/Application\ Support/rex-pet/Assets/
 `make-pet.sh` keys out the green, crops and scales to the window, and encodes alpha that AVPlayer
 plays natively. Prompt recipes and the full pipeline this borrows from live in
 [dsh-pet](https://github.com/PC2005-cloud/dsh-pet) (MIT); see [docs/MAKE-YOUR-OWN-PET.md](docs/MAKE-YOUR-OWN-PET.md).
-`tools/render-states.swift`, `tools/render-demo.swift` and `tools/render-icon.swift` regenerate
-`docs/states.png`, `docs/demo.gif` and the app icon from the real drawing code, so the README can
-never drift from the app. `tools/style-cat.swift` is the sketch pad where the look was designed.
+`tools/render-art.sh` regenerates `docs/states.png` and `docs/demo.gif` from the clips in `Assets/`,
+so the README shows what the app actually plays. `tools/render-states.swift`, `tools/render-demo.swift`
+and `tools/render-icon.swift` do the same for the drawn cat and the app icon; `tools/style-cat.swift`
+is the sketch pad where that cat was designed.
 
 ## Known gaps
 
