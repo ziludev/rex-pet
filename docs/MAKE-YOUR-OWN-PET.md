@@ -9,6 +9,10 @@ and the cat drawn in `Sources/CatSprite.swift` takes over.
 clip (green screen or alpha)  →  tools/make-pet.sh  →  hevc-with-alpha .mov  →  Assets/<state>.mov
 ```
 
+If you would rather ship a PNG sequence than a clip, `Themes/` has five examples and
+`tools/install-theme.sh` encodes one into the same `.mov` format — copy that layout
+(`Themes/<name>/<state>/001.png`) if you want to keep yours alongside it.
+
 ## 1. Get a clip
 
 Two kinds of source work: a green-screen video you generated, or a clip that already carries alpha

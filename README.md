@@ -158,10 +158,24 @@ language switch) and exits non-zero on failure; CI runs exactly that.
 `REX_PET_REX_BIN` overrides the `rex` lookup, `REX_PET_LANG=en|zh` overrides the UI language,
 `REX_PET_DEBUG=1` logs to stderr.
 
+## Other pets
+
+Five ready-made characters live in [`Themes/`](Themes/README.md) — red panda, shiba, capybara,
+penguin and a CRT robot — each a 16-frame, 12 fps PNG sequence per state. One command swaps the pet
+without touching the app:
+
+```sh
+./tools/install-theme.sh shiba        # or red-panda, capybara, penguin, retro-robot
+./tools/install-theme.sh --restore-default
+```
+
+It encodes the frames into the same HEVC-with-alpha clips the app already plays and drops them in
+`~/Library/Application Support/rex-pet/Assets/`, which outranks the bundled whale.
+
 ## Your own art
 
-The built-in cat is drawn in code, but any state can be replaced by a clip you generate:
-a green-screen video in, one HEVC-with-alpha `.mov` out.
+Any state can be replaced by a clip you generate: a green-screen video in, one HEVC-with-alpha
+`.mov` out.
 
 ```
 tools/make-pet.sh working ~/clip.mp4          # → build/assets/working.mov
