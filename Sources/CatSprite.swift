@@ -41,16 +41,6 @@ enum CatSprite {
 
     // MARK: - Animation
 
-    private static func bob(state: PetState, time: TimeInterval) -> CGFloat {
-        switch state {
-        case .idle: return CGFloat(sin(time * 2.2)) * 2.0
-        case .working: return CGFloat(sin(time * 4.0)) * 3.0
-        case .blocked: return CGFloat(sin(time * 6.0)) * 1.4
-        case .done: return CGFloat(sin(time * 3.0)) * 2.0
-        case .error: return CGFloat(sin(time * 5.0)) * 1.2
-        }
-    }
-
     /// Blocked and error states stare without blinking: a fixed gaze reads as
     /// "I am stuck on you".
     private static func isBlinking(state: PetState, time: TimeInterval) -> Bool {
@@ -64,13 +54,47 @@ enum CatSprite {
     // MARK: - Entry point
 
     static func draw(in rect: NSRect, state: PetState, time: TimeInterval) {
-        let scale = min(rect.width, rect.height) / 210
-        let center = NSPoint(x: rect.midX, y: rect.midY + 6 * scale + bob(state: state, time: time))
+        draw(in: rect, state: state, bob: bob(state: state, time: time),
+             blink: isBlinking(state: state, time: time), pulse: haloPulse(state: state, time: time))
+    }
 
-        drawHalo(state: state, center: center, scale: scale, time: time)
+    /// Same picture with the animation inputs supplied, so a caller can cache the
+    /// rendering and animate only the offset instead of repainting every frame.
+    static func draw(in rect: NSRect, state: PetState, bob: CGFloat, blink: Bool, pulse: CGFloat) {
+        let scale = min(rect.width, rect.height) / 210
+        let center = NSPoint(x: rect.midX, y: rect.midY + 6 * scale + bob)
+
+        drawHalo(state: state, center: center, scale: scale, pulse: pulse)
         drawBody(center: center, scale: scale)
-        drawFace(center: center, scale: scale, blink: isBlinking(state: state, time: time))
+        drawFace(center: center, scale: scale, blink: blink)
         drawBadge(state: state, center: center, scale: scale)
+    }
+
+    /// Vertical offset of the whole cat: what makes a still drawing breathe.
+    static func bob(state: PetState, time: TimeInterval) -> CGFloat {
+        let t = time
+        switch state {
+        case .idle: return CGFloat(sin(t * 2.2) * 2)
+        case .working: return CGFloat(sin(t * 4) * 3)
+        case .blocked: return CGFloat(sin(t * 6) * 1.4)
+        case .done: return CGFloat(sin(t * 3) * 2)
+        case .error: return CGFloat(sin(t * 5) * 1.2)
+        }
+    }
+
+    static func blinkPhase(state: PetState, time: TimeInterval) -> Bool {
+        isBlinking(state: state, time: time)
+    }
+
+    /// How often the bob cycle repeats, so a cache stays smooth without a 30 Hz repaint.
+    static func frameInterval(state: PetState) -> CFTimeInterval {
+        1.0 / 24.0
+    }
+
+    /// Pace of the glow, quantised: a cached rendering only needs a few steps.
+    static func haloPulse(state: PetState, time: TimeInterval) -> CGFloat {
+        let speed: Double = state == .blocked ? 3.4 : 1.8
+        return CGFloat(0.85 + 0.15 * (sin(time * speed) * 0.5 + 0.5))
     }
 
     // MARK: - Icon and menu bar
@@ -155,12 +179,8 @@ enum CatSprite {
         return p
     }
 
-    private static func drawHalo(state: PetState, center: NSPoint, scale: CGFloat, time: TimeInterval) {
+    private static func drawHalo(state: PetState, center: NSPoint, scale: CGFloat, pulse: CGFloat) {
         guard let color = haloColor(state) else { return }
-
-        // Breathing glow: blocked pulses faster so it pulls the eye.
-        let speed: Double = state == .blocked ? 3.4 : 1.8
-        let pulse = 0.85 + 0.15 * (sin(time * speed) * 0.5 + 0.5)
 
         NSGraphicsContext.saveGraphicsState()
         let shadow = NSShadow()
@@ -194,7 +214,7 @@ enum CatSprite {
         // otherwise has no separation from the background.
         NSGraphicsContext.saveGraphicsState()
         let headShadow = NSShadow()
-        headShadow.shadowBlurRadius = 13 * scale
+        headShadow.shadowBlurRadius = 0 * scale
         headShadow.shadowOffset = NSSize(width: 0, height: -5 * scale)
         headShadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.32)
         headShadow.set()

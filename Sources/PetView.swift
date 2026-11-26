@@ -67,10 +67,16 @@ final class PetView: NSView {
     }
 
     private func startTicking() {
+        ticker?.invalidate()
+        // A playing clip is composited by AVPlayerLayer, so nothing here needs a
+        // redraw; waking 30 times a second for an empty draw is battery for free.
+        // The slow tick still samples playback, which is how a stalled clip is caught.
+        let interval: CFTimeInterval = movieLayer == nil ? 1.0 / 30.0 : 1.0
         // .common mode keeps the animation alive while a drag tracking loop runs.
-        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            self?.needsDisplay = true
-            self?.reportPlayback()
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            if self.movieLayer == nil { self.needsDisplay = true }
+            self.reportPlayback()
         }
         RunLoop.main.add(timer, forMode: .common)
         ticker = timer
@@ -138,7 +144,11 @@ final class PetView: NSView {
             drawSprite()
             return
         }
-        CatSprite.draw(in: petRect, state: petState, time: CACurrentMediaTime() - bornAt)
+        let time = CACurrentMediaTime() - bornAt
+        let blink = CatSprite.blinkPhase(state: petState, time: time)
+        guard let image = art(for: petState, blink: blink) else { return }
+        let bob = CatSprite.bob(state: petState, time: time)
+        image.draw(in: petRect.offsetBy(dx: 0, dy: bob), from: .zero, operation: .sourceOver, fraction: 1)
     }
 
     private func drawSprite() {
@@ -177,6 +187,42 @@ final class PetView: NSView {
     }
 
     // MARK: - Assets
+
+    /// The drawn cat costs ~5 ms a frame, which is real battery for a desk pet that
+    /// sits there for hours. Render it once per pose and animate only the offset.
+    private var artCache: NSImage?
+    private var artCacheKey = ""
+
+    private func art(for state: PetState, blink: Bool) -> NSImage? {
+        let key = "\(state.rawValue)-\(blink)"
+        if key == artCacheKey, let cached = artCache { return cached }
+
+        let side = petSide
+        let pixels = Int(side * 2) // retina; the cache is blitted 1:1 otherwise
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .calibratedRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ) else { return nil }
+        rep.size = NSSize(width: side, height: side)
+
+        NSGraphicsContext.saveGraphicsState()
+        if let context = NSGraphicsContext(bitmapImageRep: rep) {
+            NSGraphicsContext.current = context
+            context.imageInterpolation = .high
+            // The glow is frozen at one phase: it is decoration, and animating it
+            // was most of the per-frame cost.
+            CatSprite.draw(in: NSRect(x: 0, y: 0, width: side, height: side),
+                           state: state, bob: 0, blink: blink, pulse: 0.9)
+        }
+        NSGraphicsContext.restoreGraphicsState()
+
+        let image = NSImage(size: NSSize(width: side, height: side))
+        image.addRepresentation(rep)
+        artCache = image
+        artCacheKey = key
+        return image
+    }
 
     /// Where art is looked up: the user's own folder first, so a clip dropped there
     /// replaces the bundled one, then the `Assets/` shipped inside the app.
@@ -254,6 +300,7 @@ final class PetView: NSView {
         movieLooper = nil
         movieLayer = nil
         loadedMovieURL = nil
+        startTicking()
     }
 
     override func layout() {
