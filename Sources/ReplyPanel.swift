@@ -56,16 +56,16 @@ final class ReplyPanel: NSPanel, NSTextFieldDelegate {
         promptLabel.textColor = .secondaryLabelColor
         promptLabel.lineBreakMode = .byTruncatingMiddle
 
-        let allow = makeButton("允许 (y)", tag: 0)
-        let pickOne = makeButton("选 1", tag: 1)
-        let deny = makeButton("拒绝 (n)", tag: 2)
+        let allow = makeButton(L10n.t("Allow (y)", "允许 (y)"), tag: 0)
+        let pickOne = makeButton(L10n.t("Pick 1", "选 1"), tag: 1)
+        let deny = makeButton(L10n.t("Deny (n)", "拒绝 (n)"), tag: 2)
         let interrupt = makeButton("Ctrl+C", tag: 3)
 
         let buttons = NSStackView(views: [allow, pickOne, deny, interrupt])
         buttons.orientation = .horizontal
         buttons.spacing = 6
 
-        field.placeholderString = "输入回复，回车发送 · Esc 关闭"
+        field.placeholderString = L10n.t("Type a reply · ↩ sends · Esc closes", "输入回复，回车发送 · Esc 关闭")
         field.font = NSFont.systemFont(ofSize: 12)
         field.delegate = self
         field.target = self
@@ -104,7 +104,7 @@ final class ReplyPanel: NSPanel, NSTextFieldDelegate {
     func present(blockID: String, title: String?, near anchor: NSRect) {
         targetBlock = blockID
         let short = blockID.count > 14 ? String(blockID.suffix(10)) : blockID
-        promptLabel.stringValue = "发送到 \(title.flatMap { $0.isEmpty ? nil : $0 } ?? "pane") · \(short)"
+        promptLabel.stringValue = L10n.t("Send to", "发送到") + " " + "\(title.flatMap { $0.isEmpty ? nil : $0 } ?? "pane") · \(short)"
         field.stringValue = ""
 
         previousApp = NSWorkspace.shared.frontmostApplication

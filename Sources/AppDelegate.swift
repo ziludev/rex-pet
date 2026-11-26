@@ -19,6 +19,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let machine = PetStateMachine()
     private var warnedAboutRex = false
     private var launchAtLoginItem: NSMenuItem?
+    private var demoItem: NSMenuItem?
+    private var clickThroughItem: NSMenuItem?
+    private var stateMenuItem: NSMenuItem?
     /// How long a manually written state file outranks the event stream.
     private static let overrideTTL: TimeInterval = 60
     private var clickThrough = (UserDefaults.standard.object(forKey: "clickThrough") as? Bool) ?? true
@@ -53,12 +56,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stream.onUpdate = { [weak self] update in self?.handleWatchUpdate(update) }
         stream.onStatus = { [weak self] status in
             guard let self else { return }
-            self.watchStatusItem?.title = "rex events：" + status.rawValue
+            self.watchStatusItem?.title = L10n.t("rex events: ", "rex events：") + status.label
             // A stranger's first run usually fails here (GUI apps get launchd's PATH),
             // so say it out loud once instead of sitting there looking broken.
             if status == .missingBinary, !self.warnedAboutRex {
                 self.warnedAboutRex = true
-                self.showBubble("找不到 rex：菜单里选一下路径", seconds: 8)
+                self.showBubble(L10n.t("Rex not found — pick its path in the menu", "找不到 rex：菜单里选一下路径"), seconds: 8)
             }
         }
         stream.onLog = { [weak self] message in self?.debugLog("watch \(message)") }
@@ -162,8 +165,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
 
-        let stateRoot = NSMenuItem(title: "状态", action: nil, keyEquivalent: "")
-        let stateMenu = NSMenu(title: "状态")
+        let stateRoot = NSMenuItem(title: L10n.t("State", "状态"), action: nil, keyEquivalent: "")
+        let stateMenu = NSMenu(title: L10n.t("State", "状态"))
         for state in PetState.allCases {
             let item = NSMenuItem(title: state.label, action: #selector(pickState(_:)), keyEquivalent: "")
             item.target = self
@@ -171,47 +174,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             stateMenu.addItem(item)
         }
         stateRoot.submenu = stateMenu
+        stateMenuItem = stateRoot
         menu.addItem(stateRoot)
 
-        let watchItem = NSMenuItem(title: "rex events：未运行", action: nil, keyEquivalent: "")
+        let watchItem = NSMenuItem(title: L10n.t("rex events: not running", "rex events：未运行"), action: nil, keyEquivalent: "")
         watchItem.isEnabled = false
         watchStatusItem = watchItem
         menu.addItem(watchItem)
 
-        let reconnectItem = NSMenuItem(title: "重连 rex events", action: #selector(reconnectWatch), keyEquivalent: "")
+        let reconnectItem = NSMenuItem(title: L10n.t("Reconnect rex events", "重连 rex events"), action: #selector(reconnectWatch), keyEquivalent: "")
         reconnectItem.target = self
         menu.addItem(reconnectItem)
 
-        let pickRexItem = NSMenuItem(title: "选择 rex 可执行文件…", action: #selector(pickRexBinary), keyEquivalent: "")
+        let pickRexItem = NSMenuItem(title: L10n.t("Choose the rex binary…", "选择 rex 可执行文件…"), action: #selector(pickRexBinary), keyEquivalent: "")
         pickRexItem.target = self
         menu.addItem(pickRexItem)
 
-        let loginItem = NSMenuItem(title: "登录时启动", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        let loginItem = NSMenuItem(title: L10n.t("Launch at login", "登录时启动"), action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         loginItem.target = self
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
         launchAtLoginItem = loginItem
         menu.addItem(loginItem)
 
-        let demoItem = NSMenuItem(title: "演示模式（自动轮换）", action: #selector(toggleDemo), keyEquivalent: "")
+        let demoItem = NSMenuItem(title: L10n.t("Demo mode (auto-cycle)", "演示模式（自动轮换）"), action: #selector(toggleDemo), keyEquivalent: "")
         demoItem.target = self
+        self.demoItem = demoItem
         demoItem.state = demoMode ? .on : .off
         menu.addItem(demoItem)
 
-        let clickItem = NSMenuItem(title: "透明区域点击穿透", action: #selector(toggleClickThrough), keyEquivalent: "")
+        let clickItem = NSMenuItem(title: L10n.t("Click through transparent areas", "透明区域点击穿透"), action: #selector(toggleClickThrough), keyEquivalent: "")
         clickItem.target = self
+        clickThroughItem = clickItem
         clickItem.state = clickThrough ? .on : .off
         menu.addItem(clickItem)
 
-        let resetItem = NSMenuItem(title: "复位位置", action: #selector(resetPosition), keyEquivalent: "")
+        let resetItem = NSMenuItem(title: L10n.t("Reset position", "复位位置"), action: #selector(resetPosition), keyEquivalent: "")
         resetItem.target = self
         menu.addItem(resetItem)
 
-        let replyItem = NSMenuItem(title: "回复阻塞分屏…", action: #selector(replyBlocked), keyEquivalent: "")
+        let replyItem = NSMenuItem(title: L10n.t("Reply to the blocked pane…", "回复阻塞分屏…"), action: #selector(replyBlocked), keyEquivalent: "")
         replyItem.target = self
         menu.addItem(replyItem)
 
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "退出", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: L10n.t("Quit", "退出"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
         statusItem.menu = menu
     }
@@ -226,14 +232,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               let state = PetState(rawValue: raw) else { return }
         demoMode = false
         UserDefaults.standard.set(false, forKey: "demoMode")
-        statusItem.menu?.item(withTitle: "演示模式（自动轮换）")?.state = .off
+        demoItem?.state = .off
         apply(state)
     }
 
     @objc private func toggleDemo() {
         demoMode.toggle()
         UserDefaults.standard.set(demoMode, forKey: "demoMode")
-        statusItem.menu?.item(withTitle: "演示模式（自动轮换）")?.state = demoMode ? .on : .off
+        demoItem?.state = demoMode ? .on : .off
         lastDemoSwap = 0
         if !demoMode { apply(PetContext.load().state) }
     }
@@ -252,15 +258,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if service.status == .enabled {
                 try service.unregister()
                 launchAtLoginItem?.state = .off
-                showBubble("已关闭开机启动", seconds: 2)
+                showBubble(L10n.t("Launch at login off", "已关闭开机启动"), seconds: 2)
             } else {
                 try service.register()
                 launchAtLoginItem?.state = .on
-                showBubble("已设为登录时启动", seconds: 2)
+                showBubble(L10n.t("Will start at login", "已设为登录时启动"), seconds: 2)
             }
         } catch {
             debugLog("launch at login failed: \(error.localizedDescription)")
-            showBubble("设置失败，先把 app 移到「应用程序」", seconds: 5)
+            showBubble(L10n.t("Could not set it — move the app to /Applications first", "设置失败，先把 app 移到「应用程序」"), seconds: 5)
         }
     }
 
@@ -269,7 +275,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.message = "选择 rex 命令行可执行文件"
+        panel.message = L10n.t("Choose the rex command line binary", "选择 rex 命令行可执行文件")
         panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support/com.superlogical.rex")
         NSApp.activate(ignoringOtherApps: true)
         guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -277,13 +283,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         debugLog("rex path set to \(url.path)")
         warnedAboutRex = true
         watcher?.restart()
-        showBubble("已设置 rex 路径", seconds: 2)
+        showBubble(L10n.t("rex path saved", "已设置 rex 路径"), seconds: 2)
     }
 
     @objc private func toggleClickThrough() {
         clickThrough.toggle()
         UserDefaults.standard.set(clickThrough, forKey: "clickThrough")
-        statusItem.menu?.item(withTitle: "透明区域点击穿透")?.state = clickThrough ? .on : .off
+        clickThroughItem?.state = clickThrough ? .on : .off
         updateClickThrough(forceInteractive: true)
     }
 
@@ -296,7 +302,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if context.state == .blocked, let block = context.blockID {
             showReply(block: block)
         } else {
-            showBubble("当前没有阻塞分屏")
+            showBubble(L10n.t("No pane is blocked right now", "当前没有阻塞分屏"))
         }
     }
 
@@ -358,7 +364,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func apply(_ state: PetState) {
         context.state = state
         petView.petState = state
-        if let stateMenu = statusItem.menu?.item(withTitle: "状态")?.submenu {
+        if let stateMenu = stateMenuItem?.submenu {
             for item in stateMenu.items {
                 item.state = (item.representedObject as? String) == state.rawValue ? .on : .off
             }
@@ -396,10 +402,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.debugLog("send result ok=\(ok) err=\(errorText ?? "-")")
             if ok {
-                self.showBubble("已发送", seconds: 1.5)
+                self.showBubble(L10n.t("Sent", "已发送"), seconds: 1.5)
                 self.apply(.working)
             } else {
-                self.showBubble("发送失败：\(errorText ?? "未知错误")", seconds: 4)
+                self.showBubble(L10n.t("Send failed: ", "发送失败：") + (errorText ?? L10n.t("unknown error", "未知错误")), seconds: 4)
             }
         }
     }

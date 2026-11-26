@@ -14,12 +14,21 @@ final class RexWatcher {
         let title: String?
     }
 
-    /// Human readable connection state, for the menu bar.
-    enum Status: String {
-        case starting = "连接中"
-        case running = "监听中"
-        case stopped = "未运行"
-        case missingBinary = "找不到 rex"
+    /// Connection state, shown in the menu bar.
+    enum Status {
+        case starting
+        case running
+        case stopped
+        case missingBinary
+
+        var label: String {
+            switch self {
+            case .starting: return L10n.t("connecting", "连接中")
+            case .running: return L10n.t("listening", "监听中")
+            case .stopped: return L10n.t("not running", "未运行")
+            case .missingBinary: return L10n.t("no rex found", "找不到 rex")
+            }
+        }
     }
 
     var onUpdate: ((Update) -> Void)?
@@ -61,7 +70,7 @@ final class RexWatcher {
             // Keep retrying: installing Rex after the pet started should just work,
             // and the status is what the menu and the one-off bubble read.
             setStatus(.missingBinary)
-            onLog?("找不到 rex 可执行文件，30s 后重试")
+            onLog?("no rex binary found, retrying in 30s")
             scheduleRetry(after: 30)
             return
         }
@@ -92,7 +101,7 @@ final class RexWatcher {
                 err.fileHandleForReading.readabilityHandler = nil
                 self.process = nil
                 guard !self.stopped else { return }
-                self.onLog?("rex events 退出，status=\(finished.terminationStatus)，\(Int(self.retryDelay))s 后重连")
+                self.onLog?("rex events exited, status=\(finished.terminationStatus), reconnecting in \(Int(self.retryDelay))s")
                 self.setStatus(.starting)
                 self.scheduleRetry(after: self.retryDelay)
                 // Back off so a broken rex install does not spin the CPU.
@@ -108,7 +117,7 @@ final class RexWatcher {
             buffer.removeAll()
         } catch {
             setStatus(.stopped)
-            onLog?("启动 rex events 失败：\(error.localizedDescription)")
+            onLog?("could not start rex events: \(error.localizedDescription)")
             scheduleRetry(after: 10)
         }
     }
@@ -184,7 +193,7 @@ final class RexWatcher {
 
         case "bell":
             // A bell means the terminal wants the human: treat it as blocked.
-            emit(.blocked, blockID: blockID, title: "终端在等你")
+            emit(.blocked, blockID: blockID, title: L10n.t("a terminal is waiting", "终端在等你"))
 
         case "child_exited":
             let code = detail["exit_code"] as? Int ?? 0

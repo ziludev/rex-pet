@@ -58,11 +58,11 @@ enum RexBridge {
     /// Writes raw bytes to a terminal block. Call completion on the main queue.
     static func write(blockID: String, text: String, completion: @escaping (Bool, String?) -> Void) {
         guard let bin = binary() else {
-            completion(false, "找不到 rex 可执行文件，可设 REX_PET_REX_BIN")
+            completion(false, L10n.t("no rex binary found; set REX_PET_REX_BIN", "找不到 rex 可执行文件，可设 REX_PET_REX_BIN"))
             return
         }
         guard let payload = jsonPayload(data: text) else {
-            completion(false, "参数编码失败")
+            completion(false, L10n.t("could not encode the payload", "参数编码失败"))
             return
         }
 
@@ -88,7 +88,7 @@ enum RexBridge {
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let ok = process.terminationStatus == 0
             DispatchQueue.main.async {
-                completion(ok, ok ? nil : (errText.isEmpty ? "rex 退出码 \(process.terminationStatus)" : errText))
+                completion(ok, ok ? nil : (errText.isEmpty ? L10n.t("rex exited with \(process.terminationStatus)", "rex 退出码 \(process.terminationStatus)") : errText))
             }
         }
     }

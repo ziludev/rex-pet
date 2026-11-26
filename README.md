@@ -16,7 +16,7 @@ beside the window, even an ESP32 desk display — and floating inboxes that let 
 agent. They all want a glance, a list, or a pane.
 
 Rex Pet is the ambient one. A creature sits in the corner of the screen, says what is happening with
-colour alone, and answers in one click: hit **允许 (y)** on the cat and the answer goes straight into
+colour alone, and answers in one click: hit **Allow (y)** on the cat and the answer goes straight into
 the blocked pane. No list, no window to open, nothing to keep an eye on.
 
 ## Requirements
@@ -29,7 +29,7 @@ the blocked pane. No list, no window to open, nothing to keep an eye on.
 
 A GUI-launched app inherits launchd's minimal `PATH`, so the pet looks for `rex` in the usual install
 locations (`/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`, …) and inside the Rex app itself
-before giving up. If it still cannot find one, the cat says so and offers **"选择 rex 可执行文件…"**
+before giving up. If it still cannot find one, the cat says so and offers **"Choose the rex binary…"**
 in its menu; the chosen path is remembered. It also keeps retrying every 30 s, so installing Rex
 afterwards just starts working.
 
@@ -61,10 +61,12 @@ focus back to whatever you were using:
 
 | Button | Sends |
 | --- | --- |
-| 允许 (y) | `y\r` |
-| 选 1 | `1\r` |
-| 拒绝 (n) | `n\r` |
+| Allow (y) | `y\r` |
+| Pick 1 | `1\r` |
+| Deny (n) | `n\r` |
 | Ctrl+C | `\x03` |
+
+On a Chinese system the same buttons read 允许 (y) / 选 1 / 拒绝 (n).
 | free text + Enter | the text and `\r` |
 
 Delivery is the same call [rex-beacon](https://github.com/ziludev/rex-beacon) uses:
@@ -145,7 +147,8 @@ never drift from the app. `tools/style-cat.swift` is the sketch pad where the lo
    answers `block target "…" not found` (exit 3); a blocked pane is always placed, so this does not
    bite in practice.
 4. No preferences window and no per-pane list — one cat, one aggregate state.
-5. **登录时启动** uses `SMAppService`, which wants a real bundle: it works once `RexPet.app` lives in
+5. Only English and Simplified Chinese; every other language falls back to English.
+6. **Launch at login** uses `SMAppService`, which wants a real bundle: it works once `RexPet.app` lives in
    `/Applications`, and reports a failure bubble when run from `build/`.
 
 ## Related
