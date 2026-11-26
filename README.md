@@ -11,10 +11,13 @@ Zero dependencies: plain AppKit, no Xcode project, no image assets, no third-par
 
 ## Why
 
-Rex already has plenty of ways to tell you that an agent needs attention: menu bar apps, an
-attention board, even an ESP32 desk display. All of them make you *look*. Rex Pet puts the state
-where your eyes already drift, and closes the loop: click the cat, hit **允许 (y)**, and the
-answer goes straight into the blocked pane.
+Rex already has plenty of ways to show agent state: menu bar monitors, an attention board, a panel
+beside the window, even an ESP32 desk display — and floating inboxes that let you answer a waiting
+agent. They all want a glance, a list, or a pane.
+
+Rex Pet is the ambient one. A creature sits in the corner of the screen, says what is happening with
+colour alone, and answers in one click: hit **允许 (y)** on the cat and the answer goes straight into
+the blocked pane. No list, no window to open, nothing to keep an eye on.
 
 ## Requirements
 
@@ -151,6 +154,8 @@ never drift from the app. `tools/style-cat.swift` is the sketch pad where the lo
 - [rex-radar](https://github.com/hecspc/rex-radar) — menu bar, widget, iPhone and Watch status
 - [rexboard](https://github.com/vanducng/rexboard) — attention board: which panes wait, and for how long
 - [cheap-rex-display](https://github.com/yethranayeh/cheap-rex-display) — the same idea on an ESP32 desk display
+- [rexq](https://github.com/tfcace/rexq) — floating inbox for questions and decisions from agents
+- [Rex's Tail](https://github.com/travelingflwr/rex-tail) — a panel beside Rex showing agent activity
 - [awesome-rex](https://github.com/alpha-og/awesome-rex) — the list all of the above live in
 
 ## License
