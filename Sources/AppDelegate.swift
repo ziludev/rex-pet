@@ -2,7 +2,7 @@ import AppKit
 import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let panelSize = NSSize(width: 220, height: 232)
+    private let panelSize = NSSize(width: 240, height: 264)
 
     private var panel: PetPanel!
     private var petView: PetView!

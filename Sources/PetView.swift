@@ -29,7 +29,7 @@ final class PetView: NSView {
     var onRightClick: (() -> Void)?
     var onDragEnd: ((NSPoint) -> Void)?
 
-    private let petSide: CGFloat = 160
+    private let petSide: CGFloat = 180
     private let bubbleHeight: CGFloat = 64
     private let frameInterval: CFTimeInterval = 1.0 / 12.0
 
@@ -95,7 +95,7 @@ final class PetView: NSView {
 
     private var hitRegion: NSRect {
         // Generated clips carry their own empty margin, so be forgiving.
-        var region = petRect.insetBy(dx: movieLayer == nil ? 18 : 34, dy: movieLayer == nil ? 18 : 34)
+        var region = petRect.insetBy(dx: movieLayer == nil ? 18 : 24, dy: movieLayer == nil ? 18 : 24)
         if bubbleText != nil { region = region.union(bubbleRect) }
         return region
     }
