@@ -22,7 +22,7 @@ enum EncoderError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .invalidArguments:
-            return "usage: hevc-alpha-encoder <output.mov> <width> <height> <fps>"
+            return "usage: hevc-alpha-encoder <output.mov> <width> <height> <fps> [quality]"
         case .cannotCreatePixelBuffer:
             return "failed to create a BGRA pixel buffer"
         case .emptyInput:
@@ -59,7 +59,7 @@ func waitUntilReady(_ input: AVAssetWriterInput, writer: AVAssetWriter) throws {
 }
 
 func encode() throws {
-    guard CommandLine.arguments.count == 5,
+    guard (5...6).contains(CommandLine.arguments.count),
           let width = Int(CommandLine.arguments[2]), width > 0,
           let height = Int(CommandLine.arguments[3]), height > 0,
           let fps = Int32(CommandLine.arguments[4]), fps > 0 else {
@@ -67,12 +67,15 @@ func encode() throws {
     }
 
     let outputURL = URL(fileURLWithPath: CommandLine.arguments[1])
+    let quality = CommandLine.arguments.count > 5 ? (Double(CommandLine.arguments[5]) ?? 0.7) : 0.7
     try? FileManager.default.removeItem(at: outputURL)
 
     let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
     let compression: [String: Any] = [
-        AVVideoQualityKey: 0.9,
-        kVTCompressionPropertyKey_TargetQualityForAlpha as String: 0.9,
+        // Desktop-pet frames are small and always in motion, so quality past ~0.7
+        // buys bytes the eye cannot see. Overridable as the fifth argument.
+        AVVideoQualityKey: quality,
+        kVTCompressionPropertyKey_TargetQualityForAlpha as String: quality,
     ]
     let settings: [String: Any] = [
         AVVideoCodecKey: AVVideoCodecType.hevcWithAlpha,

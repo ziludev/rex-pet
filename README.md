@@ -6,8 +6,9 @@ and — when one of them is blocked waiting for you — lets you answer without 
 
 ![Every state, drawn by the app itself](docs/demo.gif)
 
-Zero dependencies: plain AppKit, no Xcode project, no image assets, no third-party packages.
-`./build.sh` and you have an `.app`.
+Zero dependencies: plain AppKit, no Xcode project, no third-party packages. `./build.sh` and you have
+an `.app`. The character is a whale girl, art from [dsh-pet](https://github.com/PC2005-cloud/dsh-pet)
+(MIT); delete `Assets/` and the cat drawn in code takes over.
 
 ## Why
 

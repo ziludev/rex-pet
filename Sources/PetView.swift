@@ -154,8 +154,22 @@ final class PetView: NSView {
 
     // MARK: - Assets
 
-    private var assetBase: URL {
-        URL(fileURLWithPath: ("~/Library/Application Support/rex-pet/Assets" as NSString).expandingTildeInPath)
+    /// Where art is looked up: the user's own folder first, so a clip dropped there
+    /// replaces the bundled one, then the `Assets/` shipped inside the app.
+    private var assetRoots: [URL] {
+        var roots = [URL(fileURLWithPath: ("~/Library/Application Support/rex-pet/Assets" as NSString).expandingTildeInPath)]
+        if let bundled = Bundle.main.resourceURL?.appendingPathComponent("Assets") {
+            roots.append(bundled)
+        }
+        return roots
+    }
+
+    private func assetURL(_ relative: String) -> URL? {
+        for root in assetRoots {
+            let candidate = root.appendingPathComponent(relative)
+            if FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+        }
+        return nil
     }
 
     private func loadAsset() {
@@ -165,12 +179,9 @@ final class PetView: NSView {
 
     /// A state's own clip beats its frame folder: one file, 24–30 fps, no decode cost per frame.
     private func loadMovie() {
-        let candidates = [
-            assetBase.appendingPathComponent("\(petState.rawValue).mov"),
-            assetBase.appendingPathComponent("mov/\(petState.rawValue).mov"),
-            assetBase.appendingPathComponent("\(petState.rawValue)/loop.mov"),
-        ]
-        let found = candidates.first { FileManager.default.fileExists(atPath: $0.path) }
+        let found = assetURL("\(petState.rawValue).mov")
+            ?? assetURL("mov/\(petState.rawValue).mov")
+            ?? assetURL("\(petState.rawValue)/loop.mov")
         guard found != loadedMovieURL else { return }
 
         teardownMovie()
@@ -214,11 +225,12 @@ final class PetView: NSView {
         frames = []
         frameIndex = 0
 
-        let dir = assetBase.appendingPathComponent(petState.rawValue)
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: dir,
-            includingPropertiesForKeys: nil
-        ) else { return }
+        guard let dir = assetRoots.map({ $0.appendingPathComponent(petState.rawValue) })
+            .first(where: { FileManager.default.fileExists(atPath: $0.path) }),
+              let files = try? FileManager.default.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: nil
+              ) else { return }
 
         let pngs = files
             .filter { $0.pathExtension.lowercased() == "png" }
