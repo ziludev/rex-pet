@@ -10,6 +10,8 @@
   <string>dev.zilu.rexpet</string>
   <key>CFBundleExecutable</key>
   <string>RexPet</string>
+  <key>CFBundleIconFile</key>
+  <string>RexPet</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>

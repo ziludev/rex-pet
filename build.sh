@@ -11,6 +11,7 @@ ARCHS="${ARCHS:-$(uname -m)}"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+cp Resources/RexPet.icns "$APP/Contents/Resources/RexPet.icns"
 
 if [ -d Assets ]; then
   cp -R Assets "$APP/Contents/Resources/Assets"

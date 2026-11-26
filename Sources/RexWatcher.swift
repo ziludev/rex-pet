@@ -19,6 +19,7 @@ final class RexWatcher {
         case starting = "连接中"
         case running = "监听中"
         case stopped = "未运行"
+        case missingBinary = "找不到 rex"
     }
 
     var onUpdate: ((Update) -> Void)?
@@ -57,8 +58,11 @@ final class RexWatcher {
     private func launch() {
         guard !stopped else { return }
         guard let bin = RexBridge.binary() else {
-            setStatus(.stopped)
-            onLog?("找不到 rex 可执行文件，跳过事件监听")
+            // Keep retrying: installing Rex after the pet started should just work,
+            // and the status is what the menu and the one-off bubble read.
+            setStatus(.missingBinary)
+            onLog?("找不到 rex 可执行文件，30s 后重试")
+            scheduleRetry(after: 30)
             return
         }
 
@@ -90,9 +94,7 @@ final class RexWatcher {
                 guard !self.stopped else { return }
                 self.onLog?("rex events 退出，status=\(finished.terminationStatus)，\(Int(self.retryDelay))s 后重连")
                 self.setStatus(.starting)
-                let item = DispatchWorkItem { [weak self] in self?.launch() }
-                self.restartWorkItem = item
-                DispatchQueue.main.asyncAfter(deadline: .now() + self.retryDelay, execute: item)
+                self.scheduleRetry(after: self.retryDelay)
                 // Back off so a broken rex install does not spin the CPU.
                 self.retryDelay = min(self.retryDelay * 2, 30)
             }
@@ -107,7 +109,15 @@ final class RexWatcher {
         } catch {
             setStatus(.stopped)
             onLog?("启动 rex events 失败：\(error.localizedDescription)")
+            scheduleRetry(after: 10)
         }
+    }
+
+    private func scheduleRetry(after delay: TimeInterval) {
+        restartWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.launch() }
+        restartWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
     }
 
     private func setStatus(_ next: Status) {

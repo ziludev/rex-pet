@@ -3,8 +3,18 @@ import Foundation
 /// Thin wrapper over the `rex` CLI. Mirrors rex-beacon's `rexcli.BlockWrite`:
 /// `rex block call -b <block> write '{"data":"..."}'`.
 enum RexBridge {
+    /// UserDefaults key holding a `rex` path picked from the menu.
+    static let binPathDefaultsKey = "rexBinPath"
+
     static func binary() -> String? {
         var candidates: [String] = []
+
+        // A GUI-launched app inherits launchd's minimal PATH, so a rex installed by
+        // a package manager is usually invisible here. A picked path or the common
+        // install locations cover that case.
+        if let picked = UserDefaults.standard.string(forKey: binPathDefaultsKey), !picked.isEmpty {
+            candidates.append(picked)
+        }
         if let explicit = ProcessInfo.processInfo.environment["REX_PET_REX_BIN"], !explicit.isEmpty {
             candidates.append(explicit)
         }
@@ -13,13 +23,27 @@ enum RexBridge {
         }
         if let path = searchPath("rex") { candidates.append(path) }
         let home = NSHomeDirectory()
+        for dir in ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin", home + "/.local/bin", home + "/bin"] {
+            candidates.append(dir + "/rex")
+        }
         candidates.append(home + "/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex")
+        candidates.append(contentsOf: versionedRexBinaries(home: home))
         candidates.append("/Applications/Rex.app/Contents/Helpers/Rex Server.rex/Contents/MacOS/rex")
 
         for path in candidates where FileManager.default.isExecutableFile(atPath: path) {
             return path
         }
         return nil
+    }
+
+    /// Newest `Versions/<build>/Rex Server.app/Contents/MacOS/rex` when `Current`
+    /// is a real directory rather than the symlink we expect.
+    private static func versionedRexBinaries(home: String) -> [String] {
+        let root = home + "/Library/Application Support/com.superlogical.rex/RexServer/Versions"
+        let entries = (try? FileManager.default.contentsOfDirectory(atPath: root)) ?? []
+        return entries
+            .sorted(by: >)
+            .map { root + "/" + $0 + "/Rex Server.app/Contents/MacOS/rex" }
     }
 
     private static func searchPath(_ name: String) -> String? {

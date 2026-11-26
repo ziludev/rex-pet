@@ -73,6 +73,59 @@ enum CatSprite {
         drawBadge(state: state, center: center, scale: scale)
     }
 
+    // MARK: - Icon and menu bar
+
+    /// App icon: the cat on a warm rounded square, no halo or badge.
+    static func icon(size: CGFloat) -> NSImage {
+        let rect = NSRect(x: 0, y: 0, width: size, height: size)
+        let image = NSImage(size: rect.size)
+        image.lockFocus()
+
+        let radius = size * 0.22
+        let plate = NSBezierPath(roundedRect: rect.insetBy(dx: size * 0.055, dy: size * 0.055),
+                                 xRadius: radius, yRadius: radius)
+        NSGradient(starting: NSColor(calibratedRed: 0.20, green: 0.20, blue: 0.24, alpha: 1),
+                   ending: NSColor(calibratedRed: 0.10, green: 0.10, blue: 0.12, alpha: 1))?
+            .draw(in: plate, angle: -90)
+
+        let scale = size / 210
+        let center = NSPoint(x: rect.midX, y: rect.midY - 4 * scale)
+        drawBody(center: center, scale: scale)
+        drawFace(center: center, scale: scale, blink: false)
+
+        image.unlockFocus()
+        return image
+    }
+
+    /// Menu bar image: template (alpha only) so macOS tints it for light and dark bars.
+    static func menuBarImage(height: CGFloat) -> NSImage {
+        let rect = NSRect(x: 0, y: 0, width: height * 1.15, height: height)
+        let image = NSImage(size: rect.size)
+        image.lockFocus()
+
+        NSColor.black.setFill()
+        let scale = height / 130
+        let center = NSPoint(x: rect.midX, y: rect.midY - 6 * scale)
+
+        for left in [true, false] {
+            earPath(center: center, scale: scale, left: left).fill()
+        }
+        headPath(center: center, scale: scale).fill()
+
+        // Punch the eyes out so the glyph still reads as a face at menu bar size.
+        NSGraphicsContext.current?.compositingOperation = .clear
+        for sign in [CGFloat(-1), 1] {
+            NSBezierPath(ovalIn: NSRect(x: center.x + sign * 22 * scale - 6 * scale,
+                                        y: center.y - 2 * scale,
+                                        width: 12 * scale, height: 18 * scale)).fill()
+        }
+        NSGraphicsContext.current?.compositingOperation = .sourceOver
+
+        image.unlockFocus()
+        image.isTemplate = true
+        return image
+    }
+
     // MARK: - Parts
 
     private static func headPath(center: NSPoint, scale: CGFloat) -> NSBezierPath {

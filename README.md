@@ -4,7 +4,7 @@ An unofficial, ambient desktop pet for [Rex](https://superlogical.com), the term
 by Superlogical. A transparent cat sits on your desktop, mirrors what your agent panes are doing,
 and — when one of them is blocked waiting for you — lets you answer without switching panes.
 
-![Every state, drawn by the app itself](docs/states.png)
+![Every state, drawn by the app itself](docs/demo.gif)
 
 Zero dependencies: plain AppKit, no Xcode project, no image assets, no third-party packages.
 `./build.sh` and you have an `.app`.
@@ -23,6 +23,12 @@ answer goes straight into the blocked pane.
 | OS | macOS 14 or newer |
 | Rex | installed, so that `rex` is on `PATH` (or point `REX_PET_REX_BIN` at it) |
 | Toolchain | Xcode Command Line Tools (`swiftc`) — no full Xcode needed |
+
+A GUI-launched app inherits launchd's minimal `PATH`, so the pet looks for `rex` in the usual install
+locations (`/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`, …) and inside the Rex app itself
+before giving up. If it still cannot find one, the cat says so and offers **"选择 rex 可执行文件…"**
+in its menu; the chosen path is remembered. It also keeps retrying every 30 s, so installing Rex
+afterwards just starts working.
 
 ## Build and run
 
@@ -43,8 +49,9 @@ the TCC identity stable across rebuilds. There is no notarized binary yet.
   `ignoresMouseEvents`, which needs no accessibility permission.
 - **Left click** — idle/working: a bubble naming the state and the pane. Blocked: the reply panel.
 - **Drag** — moves the window; the position is remembered in `UserDefaults`.
-- **Menu bar 🐾** — set a state, demo mode, toggle click-through, reset position, reply to the
-  blocked pane, quit. The same menu is on a right click.
+- **Menu bar cat** — set a state, demo mode, toggle click-through, reset position, reply to the
+  blocked pane, pick the `rex` binary, launch at login, quit. The same menu is on a right click.
+  The menu bar glyph is a template image, so it follows the light/dark menu bar.
 
 The reply panel is a small HUD that becomes the key window just long enough to type, then hands
 focus back to whatever you were using:
@@ -64,6 +71,8 @@ rex block call -b <block> write '{"data":"y\r"}'
 ```
 
 ## States
+
+![states](docs/states.png)
 
 | State | Look | Meaning |
 | --- | --- | --- |
@@ -120,8 +129,9 @@ your panes, the cat is amber — that is a report, not a bug.
 | `~/Library/Application Support/rex-pet/Assets/<state>/*.png` | optional image sequence, 12 fps; if present it replaces the vector cat |
 
 `REX_PET_REX_BIN` overrides the `rex` lookup, `REX_PET_DEBUG=1` logs to stderr.
-`tools/render-states.swift` regenerates `docs/states.png` from the real drawing code, and
-`tools/style-cat.swift` is the sketch pad where the look was designed.
+`tools/render-states.swift`, `tools/render-demo.swift` and `tools/render-icon.swift` regenerate
+`docs/states.png`, `docs/demo.gif` and the app icon from the real drawing code, so the README can
+never drift from the app. `tools/style-cat.swift` is the sketch pad where the look was designed.
 
 ## Known gaps
 
@@ -131,7 +141,9 @@ your panes, the cat is amber — that is a report, not a bug.
 3. `write` only reaches **placed** blocks. A block created by `rex new` before any client renders it
    answers `block target "…" not found` (exit 3); a blocked pane is always placed, so this does not
    bite in practice.
-4. No launch-at-login, no preferences window, no per-pane list — one cat, one aggregate state.
+4. No preferences window and no per-pane list — one cat, one aggregate state.
+5. **登录时启动** uses `SMAppService`, which wants a real bundle: it works once `RexPet.app` lives in
+   `/Applications`, and reports a failure bubble when run from `build/`.
 
 ## Related
 

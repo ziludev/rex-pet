@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let panelSize = NSSize(width: 220, height: 232)
@@ -16,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var watchStatusItem: NSMenuItem?
     private var lastEventAt = Date.distantPast
     private let machine = PetStateMachine()
+    private var warnedAboutRex = false
+    private var launchAtLoginItem: NSMenuItem?
     /// How long a manually written state file outranks the event stream.
     private static let overrideTTL: TimeInterval = 60
     private var clickThrough = (UserDefaults.standard.object(forKey: "clickThrough") as? Bool) ?? true
@@ -49,7 +52,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let stream = RexWatcher()
         stream.onUpdate = { [weak self] update in self?.handleWatchUpdate(update) }
         stream.onStatus = { [weak self] status in
-            self?.watchStatusItem?.title = "rex events：" + status.rawValue
+            guard let self else { return }
+            self.watchStatusItem?.title = "rex events：" + status.rawValue
+            // A stranger's first run usually fails here (GUI apps get launchd's PATH),
+            // so say it out loud once instead of sitting there looking broken.
+            if status == .missingBinary, !self.warnedAboutRex {
+                self.warnedAboutRex = true
+                self.showBubble("找不到 rex：菜单里选一下路径", seconds: 8)
+            }
         }
         stream.onLog = { [weak self] message in self?.debugLog("watch \(message)") }
         stream.start()
@@ -145,7 +155,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "🐾"
+        // A template image follows the menu bar's light/dark tint, unlike an emoji.
+        let icon = CatSprite.menuBarImage(height: 16)
+        statusItem.button?.image = icon
+        statusItem.button?.imagePosition = .imageOnly
 
         let menu = NSMenu()
 
@@ -168,6 +181,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let reconnectItem = NSMenuItem(title: "重连 rex events", action: #selector(reconnectWatch), keyEquivalent: "")
         reconnectItem.target = self
         menu.addItem(reconnectItem)
+
+        let pickRexItem = NSMenuItem(title: "选择 rex 可执行文件…", action: #selector(pickRexBinary), keyEquivalent: "")
+        pickRexItem.target = self
+        menu.addItem(pickRexItem)
+
+        let loginItem = NSMenuItem(title: "登录时启动", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        loginItem.target = self
+        loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        launchAtLoginItem = loginItem
+        menu.addItem(loginItem)
 
         let demoItem = NSMenuItem(title: "演示模式（自动轮换）", action: #selector(toggleDemo), keyEquivalent: "")
         demoItem.target = self
@@ -217,6 +240,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func reconnectWatch() {
         watcher?.restart()
+    }
+
+    /// Lets the user point the pet at a rex binary the app cannot find on its own
+    /// (GUI apps do not inherit the shell PATH).
+    /// `SMAppService` needs a real bundle, so this fails when the app still runs
+    /// from `build/`; the bubble says so instead of pretending it worked.
+    @objc private func toggleLaunchAtLogin() {
+        let service = SMAppService.mainApp
+        do {
+            if service.status == .enabled {
+                try service.unregister()
+                launchAtLoginItem?.state = .off
+                showBubble("已关闭开机启动", seconds: 2)
+            } else {
+                try service.register()
+                launchAtLoginItem?.state = .on
+                showBubble("已设为登录时启动", seconds: 2)
+            }
+        } catch {
+            debugLog("launch at login failed: \(error.localizedDescription)")
+            showBubble("设置失败，先把 app 移到「应用程序」", seconds: 5)
+        }
+    }
+
+    @objc private func pickRexBinary() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.message = "选择 rex 命令行可执行文件"
+        panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support/com.superlogical.rex")
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        UserDefaults.standard.set(url.path, forKey: RexBridge.binPathDefaultsKey)
+        debugLog("rex path set to \(url.path)")
+        warnedAboutRex = true
+        watcher?.restart()
+        showBubble("已设置 rex 路径", seconds: 2)
     }
 
     @objc private func toggleClickThrough() {
