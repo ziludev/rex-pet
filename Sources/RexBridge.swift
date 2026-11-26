@@ -57,19 +57,30 @@ enum RexBridge {
 
     /// Writes raw bytes to a terminal block. Call completion on the main queue.
     static func write(blockID: String, text: String, completion: @escaping (Bool, String?) -> Void) {
-        guard let bin = binary() else {
-            completion(false, L10n.t("no rex binary found; set REX_PET_REX_BIN", "找不到 rex 可执行文件，可设 REX_PET_REX_BIN"))
-            return
-        }
         guard let payload = jsonPayload(data: text) else {
             completion(false, L10n.t("could not encode the payload", "参数编码失败"))
+            return
+        }
+        run(["block", "call", "-b", blockID, "write", payload], completion: completion)
+    }
+
+    /// Brings a pane to the front in Rex, so a click on the cat can lead to the
+    /// agent that is actually waiting.
+    static func focus(blockID: String, completion: @escaping (Bool, String?) -> Void) {
+        run(["focus", blockID], completion: completion)
+    }
+
+    /// Runs `rex` with arguments and reports success plus stderr on the main queue.
+    static func run(_ arguments: [String], completion: @escaping (Bool, String?) -> Void) {
+        guard let bin = binary() else {
+            completion(false, L10n.t("no rex binary found; set REX_PET_REX_BIN", "找不到 rex 可执行文件，可设 REX_PET_REX_BIN"))
             return
         }
 
         DispatchQueue.global(qos: .userInitiated).async {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: bin)
-            process.arguments = ["block", "call", "-b", blockID, "write", payload]
+            process.arguments = arguments
 
             let errPipe = Pipe()
             process.standardError = errPipe

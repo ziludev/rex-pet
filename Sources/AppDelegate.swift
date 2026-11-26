@@ -243,6 +243,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         resetItem.target = self
         menu.addItem(resetItem)
 
+        let revealItem = NSMenuItem(title: L10n.t("Show the pane in Rex", "在 Rex 中定位当前分屏"), action: #selector(revealPane), keyEquivalent: "")
+        revealItem.target = self
+        revealItem.isEnabled = context.blockID != nil
+        menu.addItem(revealItem)
+
         let replyItem = NSMenuItem(title: L10n.t("Reply to the blocked pane…", "回复阻塞分屏…"), action: #selector(replyBlocked), keyEquivalent: "")
         replyItem.target = self
         menu.addItem(replyItem)
@@ -327,6 +332,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func resetPosition() {
         UserDefaults.standard.removeObject(forKey: "petOrigin")
         panel.setFrameOrigin(restoreOrigin())
+    }
+
+    /// Focus the pane the cat is reporting, so "the agent needs me" leads somewhere.
+    @objc private func revealPane() {
+        guard let block = context.blockID else {
+            showBubble(L10n.t("No pane is active right now", "当前没有活动分屏"))
+            return
+        }
+        RexBridge.focus(blockID: block) { [weak self] ok, error in
+            guard let self else { return }
+            if ok {
+                activateRex()
+            } else {
+                showBubble(L10n.t("Could not focus the pane: \(error ?? "")", "无法定位分屏：\(error ?? "")"))
+            }
+        }
+    }
+
+    private func activateRex() {
+        guard let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "com.superlogical.rex" }) else { return }
+        app.activate(options: [.activateIgnoringOtherApps])
     }
 
     @objc private func replyBlocked() {
