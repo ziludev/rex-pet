@@ -20,8 +20,44 @@ final class PetView: NSView {
         case vector
     }
 
+    enum PetSize: String, CaseIterable {
+        case small
+        case medium
+        case large
+
+        var petSide: CGFloat {
+            switch self {
+            case .small: return 140
+            case .medium: return 180
+            case .large: return 220
+            }
+        }
+
+        var panelSize: NSSize {
+            NSSize(width: petSide + 60, height: petSide + 84)
+        }
+
+        var label: String {
+            switch self {
+            case .small: return L10n.t("Small (140 pt)", "小 (140 pt)")
+            case .medium: return L10n.t("Medium (180 pt)", "中 (180 pt)")
+            case .large: return L10n.t("Large (220 pt)", "大 (220 pt)")
+            }
+        }
+    }
+
     static let defaultThemeID = "default"
     static let vectorThemeID = "vector"
+    static let whaleThemeID = "whale-girl"
+
+    var petSize: PetSize = .medium {
+        didSet {
+            guard petSize != oldValue else { return }
+            artCache.removeAll()
+            needsLayout = true
+            needsDisplay = true
+        }
+    }
 
     var selectedTheme: String = PetView.defaultThemeID {
         didSet {
@@ -47,10 +83,11 @@ final class PetView: NSView {
 
     var onLog: ((String) -> Void)?
     var onClick: (() -> Void)?
+    var onReveal: (() -> Void)?
     var onRightClick: (() -> Void)?
     var onDragEnd: ((NSPoint) -> Void)?
 
-    private let petSide: CGFloat = 180
+    private var petSide: CGFloat { petSize.petSide }
     private let bubbleHeight: CGFloat = 64
     private let frameInterval: CFTimeInterval = 1.0 / 12.0
 
@@ -175,27 +212,35 @@ final class PetView: NSView {
     }
 
     private var currentBubbleRect: NSRect {
-        let maxW = bounds.width - 16
-        let height: CGFloat
+        let maxW = bounds.width - 20
+        let tailH: CGFloat = 6
+        let horizontalChrome: CGFloat = 34 // left pad + status dot + gap + right pad
+        let bodyW: CGFloat
+        let bodyH: CGFloat
         if let text = bubbleText {
-            let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12, weight: .medium)]
-            let measured = (text as NSString).boundingRect(
-                with: NSSize(width: maxW - 16, height: bubbleHeight - 10),
-                options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
-                attributes: attrs
+            let measured = attributedBubbleText(text).boundingRect(
+                with: NSSize(width: maxW - horizontalChrome, height: 42),
+                options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine]
             )
-            height = min(bubbleHeight - 8, max(30, ceil(measured.height) + 14))
+            bodyW = min(maxW, max(64, ceil(measured.width) + horizontalChrome))
+            bodyH = min(54, max(28, ceil(measured.height) + 12))
         } else {
-            height = bubbleHeight - 10
+            bodyW = 96
+            bodyH = 30
         }
-        return NSRect(x: 8, y: bounds.height - height - 8, width: maxW, height: height)
+        let x = round((bounds.width - bodyW) / 2)
+        let y = petRect.maxY - 8 + tailH
+        return NSRect(x: x, y: y, width: bodyW, height: bodyH)
     }
 
     private var hitRegion: NSRect {
         // Generated clips and PNG packs carry their own empty margin, so be forgiving.
         let inset: CGFloat = (movieLayer == nil && frames.isEmpty) ? 18 : 24
         var region = petRect.insetBy(dx: inset, dy: inset)
-        if bubbleText != nil { region = region.union(currentBubbleRect) }
+        if bubbleText != nil {
+            let bubbleWithTail = currentBubbleRect.insetBy(dx: 0, dy: -6)
+            region = region.union(bubbleWithTail)
+        }
         return region
     }
 
@@ -237,34 +282,90 @@ final class PetView: NSView {
         ctx.draw(image, in: CGRect(x: rect.midX - w / 2, y: rect.minY, width: w, height: h))
     }
 
+    private func bubbleAccentColor() -> NSColor {
+        switch petState {
+        case .idle: return NSColor(calibratedRed: 0.48, green: 0.86, blue: 0.96, alpha: 1)
+        case .working: return NSColor(calibratedRed: 1.0, green: 0.78, blue: 0.30, alpha: 1)
+        case .blocked: return NSColor(calibratedRed: 1.0, green: 0.44, blue: 0.46, alpha: 1)
+        case .done: return NSColor(calibratedRed: 0.42, green: 0.90, blue: 0.58, alpha: 1)
+        case .error: return NSColor(calibratedRed: 0.85, green: 0.45, blue: 0.98, alpha: 1)
+        }
+    }
+
+    private func attributedBubbleText(_ text: String) -> NSAttributedString {
+        let primary: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11.5, weight: .semibold),
+            .foregroundColor: NSColor(calibratedWhite: 0.96, alpha: 1),
+        ]
+        let secondary: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11.5, weight: .regular),
+            .foregroundColor: NSColor(calibratedWhite: 0.74, alpha: 1),
+        ]
+        let out = NSMutableAttributedString()
+        if let range = text.range(of: " · ") {
+            out.append(NSAttributedString(string: String(text[..<range.lowerBound]), attributes: primary))
+            out.append(NSAttributedString(string: String(text[range.lowerBound...]), attributes: secondary))
+        } else {
+            out.append(NSAttributedString(string: text, attributes: primary))
+        }
+        return out
+    }
+
+    private func bubblePath(body rect: NSRect) -> NSBezierPath {
+        let r = min(13, rect.height / 2)
+        let tailHalfW: CGFloat = 5.5
+        let tailH: CGFloat = 6
+        let midX = rect.midX
+
+        let p = NSBezierPath()
+        // Start right of the bottom-center tail and trace counter-clockwise in Cocoa coords
+        p.move(to: NSPoint(x: midX + tailHalfW, y: rect.minY))
+        p.line(to: NSPoint(x: rect.maxX - r, y: rect.minY))
+        p.appendArc(withCenter: NSPoint(x: rect.maxX - r, y: rect.minY + r), radius: r, startAngle: 270, endAngle: 0)
+        p.line(to: NSPoint(x: rect.maxX, y: rect.maxY - r))
+        p.appendArc(withCenter: NSPoint(x: rect.maxX - r, y: rect.maxY - r), radius: r, startAngle: 0, endAngle: 90)
+        p.line(to: NSPoint(x: rect.minX + r, y: rect.maxY))
+        p.appendArc(withCenter: NSPoint(x: rect.minX + r, y: rect.maxY - r), radius: r, startAngle: 90, endAngle: 180)
+        p.line(to: NSPoint(x: rect.minX, y: rect.minY + r))
+        p.appendArc(withCenter: NSPoint(x: rect.minX + r, y: rect.minY + r), radius: r, startAngle: 180, endAngle: 270)
+        p.line(to: NSPoint(x: midX - tailHalfW, y: rect.minY))
+        p.line(to: NSPoint(x: midX, y: rect.minY - tailH))
+        p.close()
+        p.lineJoinStyle = .round
+        return p
+    }
+
     private func drawBubble(_ text: String) {
         let rect = currentBubbleRect
-        let path = NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10)
+        let path = bubblePath(body: rect)
 
         NSGraphicsContext.saveGraphicsState()
         let shadow = NSShadow()
-        shadow.shadowBlurRadius = 6
-        shadow.shadowOffset = NSSize(width: 0, height: -2)
-        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.18)
+        shadow.shadowBlurRadius = 10
+        shadow.shadowOffset = NSSize(width: 0, height: -3)
+        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.38)
         shadow.set()
-        NSColor(white: 1.0, alpha: 0.95).setFill()
+        NSColor(calibratedRed: 0.11, green: 0.12, blue: 0.15, alpha: 0.92).setFill()
         path.fill()
         NSGraphicsContext.restoreGraphicsState()
 
-        NSColor(white: 0.0, alpha: 0.14).setStroke()
+        NSColor(calibratedWhite: 1.0, alpha: 0.15).setStroke()
         path.lineWidth = 1
         path.stroke()
 
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
-            .foregroundColor: NSColor(white: 0.15, alpha: 1),
-        ]
-        let inset = rect.insetBy(dx: 8, dy: 6)
-        (text as NSString).draw(
-            with: inset,
-            options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
-            attributes: attrs
-        )
+        // State accent dot on the left of the text
+        let dotSize: CGFloat = 7
+        let dotY = rect.midY - dotSize / 2
+        let dotRect = NSRect(x: rect.minX + 11, y: dotY, width: dotSize, height: dotSize)
+        bubbleAccentColor().setFill()
+        NSBezierPath(ovalIn: dotRect).fill()
+
+        let attrText = attributedBubbleText(text)
+        let textInset = NSRect(x: rect.minX + 24, y: rect.minY + 5, width: rect.width - 34, height: rect.height - 10)
+        let measured = attrText.boundingRect(with: textInset.size, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        let centeredY = rect.minY + (rect.height - ceil(measured.height)) / 2
+        let drawRect = NSRect(x: textInset.minX, y: centeredY, width: textInset.width, height: ceil(measured.height) + 2)
+        attrText.draw(with: drawRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
     }
 
     // MARK: - Assets
@@ -313,6 +414,12 @@ final class PetView: NSView {
 
     static func assetRoots(forTheme theme: String, appSupport: URL, bundleResources: URL?) -> [URL] {
         if theme == vectorThemeID { return [] }
+        if theme == whaleThemeID {
+            if let bundled = bundleResources?.appendingPathComponent("Assets") {
+                return [bundled]
+            }
+            return []
+        }
         if theme != defaultThemeID {
             var roots = [appSupport.appendingPathComponent("Themes").appendingPathComponent(theme)]
             if let bundled = bundleResources?.appendingPathComponent("Themes").appendingPathComponent(theme) {
@@ -320,11 +427,8 @@ final class PetView: NSView {
             }
             return roots
         }
-        var roots = [appSupport.appendingPathComponent("Assets")]
-        if let bundled = bundleResources?.appendingPathComponent("Assets") {
-            roots.append(bundled)
-        }
-        return roots
+        // Default uses user-dropped Assets/ if present, otherwise falls back to the built-in vector cat.
+        return [appSupport.appendingPathComponent("Assets")]
     }
 
     static func availableThemes(appSupport: URL = URL(fileURLWithPath: ("~/Library/Application Support/rex-pet" as NSString).expandingTildeInPath),
@@ -337,6 +441,10 @@ final class PetView: NSView {
                 let isDir = (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
                 if isDir { names.insert(item.lastPathComponent) }
             }
+        }
+        if let assets = bundleResources?.appendingPathComponent("Assets"),
+           fm.fileExists(atPath: assets.appendingPathComponent("idle.mov").path) {
+            names.insert(whaleThemeID)
         }
         return names.sorted()
     }
@@ -553,6 +661,8 @@ final class PetView: NSView {
         isDragging = false
         if didDrag {
             onDragEnd?(window?.frame.origin ?? .zero)
+        } else if event.modifierFlags.contains(.option) || (petState != .blocked && event.clickCount >= 2) {
+            onReveal?()
         } else {
             onClick?()
         }

@@ -8,9 +8,9 @@ panes.
 ![Retro CRT Robot cycling through all five states](docs/demo.gif)
 
 Zero dependencies: plain AppKit, no Xcode project, no third-party packages. `./build.sh` and you have
-an `.app`. Five custom characters — a **Retro CRT Robot**, **Red Panda**, **Shiba Inu**, **Capybara**,
-and **Penguin** — are bundled in [`Themes/`](Themes/README.md) and switchable right from the **Theme**
-menu, alongside the built-in vector cat drawn in code (`CatSprite`).
+an `.app`. The default pet is the vector cat drawn in code (`CatSprite`); five custom characters —
+a **Retro CRT Robot**, **Red Panda**, **Shiba Inu**, **Capybara**, and **Penguin** — plus the
+**Whale Girl** live in the **Theme** menu.
 
 ## Why
 
@@ -69,11 +69,10 @@ plus its SHA-256 — that is exactly what a release uploads.
 - **The pet is the only clickable part.** Everywhere else in its window, clicks fall through to
   whatever is underneath: the window polls the mouse position at 20 Hz and flips
   `ignoresMouseEvents`, which needs no accessibility permission.
-- **Left click** — idle/working: a bubble naming the state and the pane. Blocked: the reply panel.
+- **Left click** — idle/working: a compact status bubble naming the state and the pane. Blocked: the reply panel.
+- **Double-click (or Option + click)** — focuses the active pane directly in Rex.
 - **Drag** — moves the window; the position is remembered in `UserDefaults`.
-- **Menu bar icon** — set a state, demo mode, toggle click-through, reset position, reply to the
-  blocked pane, pick the `rex` binary, launch at login, quit. The same menu is on a right click.
-  The menu bar glyph is a template image, so it follows the light/dark menu bar.
+- **Menu bar icon** — shows a badge dot when blocked; opens a menu to set state, theme, size (`Small / Medium / Large`), demo mode, blocked bubble alerts, click-through, reset position, reply to any blocked pane, pick the `rex` binary, launch at login, or quit. The same menu is on a right click.
 
 The reply panel is a small HUD that becomes the key window just long enough to type, then hands
 focus back to whatever you were using:
@@ -163,13 +162,14 @@ CI runs exactly that.
 ## Bundled themes
 
 Five custom animated characters live in [`Themes/`](Themes/README.md) — **Red Panda**, **Shiba Inu**,
-**Capybara**, **Penguin**, and **Retro CRT Robot** — each with 24 articulated frames per state (18 fps)
-and character-specific animations (wagging tails, flapping wings, bouncing yuzu, live CRT loading bar
-& alternating keyboard typing).
+**Capybara**, **Penguin**, and **Retro CRT Robot** — encoded as compact 24 fps HEVC-with-alpha
+`.mov` clips with character-specific animations (wagging tails, flapping wings, bouncing yuzu, live
+CRT loading bar & alternating keyboard typing).
 
 ![All five bundled pet themes](Themes/all-themes-preview.png)
 
-Switch themes directly from the **Theme** submenu in the menu bar / right-click menu, or install a
+Switch themes directly from the **Theme** submenu in the menu bar / right-click menu (including
+the **Whale Girl** clip pack from [dsh-pet](https://github.com/PC2005-cloud/dsh-pet)), or install a
 theme as `.mov` clips into `~/Library/Application Support/rex-pet/Assets/`:
 
 ```sh

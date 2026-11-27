@@ -13,6 +13,7 @@ enum SelfTest {
         assetResolution()
         replyPlacement()
         replies()
+        uiHelpers()
         language()
         print("\(checks - failures)/\(checks) checks passed")
         return failures == 0 ? 0 : 1
@@ -69,6 +70,15 @@ enum SelfTest {
         let mixed = machine.snapshot(now: start + 6)
         expect(mixed.state == .blocked, "blocked outranks a newer working")
         expect(mixed.blockID == "block:b", "the snapshot names the pane that needs attention")
+        expect(mixed.blockedCount == 1, "single blocked pane reports count 1")
+
+        // Multiple blocked panes are tracked and ordered newest first.
+        machine.apply(update(.blocked, "block:c"), now: start + 7)
+        let multi = machine.snapshot(now: start + 8)
+        expect(multi.blockedCount == 2 && multi.blockedPanes.map(\.blockID) == ["block:c", "block:b"],
+               "multiple blocked panes are tracked newest-first")
+        machine.apply(update(.idle, "block:c"), now: start + 9)
+        expect(machine.snapshot(now: start + 9.1).blockedCount == 1, "clearing one blocked pane drops count to 1")
 
         // Error outranks done, done outranks working.
         machine.reset()
@@ -194,6 +204,16 @@ enum SelfTest {
             let res4 = PetView.resolveAsset(for: .error, in: [userRoot, bundledRoot])
             expect(res4 == .vector, "missing asset falls back to vector cat")
 
+            // Default theme checks only user Assets/ so empty user folder falls back to built-in Cat.
+            let defaultRoots = PetView.assetRoots(forTheme: PetView.defaultThemeID, appSupport: tmp, bundleResources: bundledRoot)
+            expect(defaultRoots.count == 1 && defaultRoots[0].path.hasSuffix("/Assets"),
+                   "default theme checks user Assets only and falls back to built-in cat")
+
+            // Whale Girl theme resolves explicitly to bundled Assets/.
+            let whaleRoots = PetView.assetRoots(forTheme: PetView.whaleThemeID, appSupport: tmp, bundleResources: bundledRoot)
+            expect(whaleRoots.count == 1 && whaleRoots[0].standardizedFileURL == bundledRoot.appendingPathComponent("Assets").standardizedFileURL,
+                   "whale-girl theme resolves explicitly to bundled Assets")
+
             // Named theme isolates roots away from default Assets, and vector theme clears roots.
             let themeRoots = PetView.assetRoots(forTheme: "shiba", appSupport: tmp, bundleResources: bundledRoot)
             expect(themeRoots.count == 2 && themeRoots[0].path.hasSuffix("/Themes/shiba"),
@@ -236,6 +256,15 @@ enum SelfTest {
             .flatMap { $0.data(using: .utf8) }
             .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: String] }
         expect(decoded?["data"] == awkward, "a typed answer with quotes round-trips through the CLI payload")
+    }
+
+    // MARK: - UI helpers
+
+    private static func uiHelpers() {
+        expect(PetView.PetSize.small.petSide == 140 && PetView.PetSize.medium.petSide == 180 && PetView.PetSize.large.petSide == 220,
+               "pet size presets match expected dimensions")
+        expect(CatSprite.menuBarImage(height: 16, blocked: false).isTemplate && CatSprite.menuBarImage(height: 16, blocked: true).isTemplate,
+               "menu bar icons render as template images in both normal and blocked states")
     }
 
     // MARK: - Language

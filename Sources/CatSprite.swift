@@ -122,14 +122,14 @@ enum CatSprite {
     }
 
     /// Menu bar image: template (alpha only) so macOS tints it for light and dark bars.
-    static func menuBarImage(height: CGFloat) -> NSImage {
-        let rect = NSRect(x: 0, y: 0, width: height * 1.15, height: height)
+    static func menuBarImage(height: CGFloat, blocked: Bool = false) -> NSImage {
+        let rect = NSRect(x: 0, y: 0, width: height * 1.25, height: height)
         let image = NSImage(size: rect.size)
         image.lockFocus()
 
         NSColor.black.setFill()
         let scale = height / 130
-        let center = NSPoint(x: rect.midX, y: rect.midY - 6 * scale)
+        let center = NSPoint(x: height * 1.15 * 0.5, y: rect.midY - 6 * scale)
 
         for left in [true, false] {
             earPath(center: center, scale: scale, left: left).fill()
@@ -144,6 +144,14 @@ enum CatSprite {
                                         width: 12 * scale, height: 18 * scale)).fill()
         }
         NSGraphicsContext.current?.compositingOperation = .sourceOver
+
+        if blocked {
+            let dotR = height * 0.16
+            let dotRect = NSRect(x: rect.maxX - dotR * 2 - 0.5, y: rect.maxY - dotR * 2 - 0.5,
+                                 width: dotR * 2, height: dotR * 2)
+            NSColor.black.setFill()
+            NSBezierPath(ovalIn: dotRect).fill()
+        }
 
         image.unlockFocus()
         image.isTemplate = true

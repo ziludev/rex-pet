@@ -12,10 +12,18 @@ import AppKit
 /// and `working` expires when nothing refreshes it (a pane that exits without a
 /// child_exited, or a dropped stream).
 final class PetStateMachine {
+    struct BlockedPane: Equatable {
+        let blockID: String
+        let title: String?
+    }
+
     struct Snapshot {
         let state: PetState
         let blockID: String?
         let title: String?
+        let blockedPanes: [BlockedPane]
+
+        var blockedCount: Int { blockedPanes.count }
     }
 
     private struct Entry {
@@ -69,6 +77,11 @@ final class PetStateMachine {
 
     func snapshot(now: Date = Date()) -> Snapshot {
         prune(now: now)
+        let blockedPanes = entries
+            .filter { $0.value.state == .blocked && $0.key != unknownKey }
+            .sorted { $0.value.updatedAt > $1.value.updatedAt }
+            .map { BlockedPane(blockID: $0.key, title: $0.value.title) }
+
         let best = entries
             .filter { $1.state != .idle }
             .max { lhs, rhs in
@@ -77,10 +90,13 @@ final class PetStateMachine {
                 if lp != rp { return lp < rp }
                 return lhs.value.updatedAt < rhs.value.updatedAt
             }
-        guard let best else { return Snapshot(state: .idle, blockID: nil, title: nil) }
+        guard let best else {
+            return Snapshot(state: .idle, blockID: nil, title: nil, blockedPanes: [])
+        }
         return Snapshot(state: best.value.state,
                         blockID: best.key == unknownKey ? nil : best.key,
-                        title: best.value.title)
+                        title: best.value.title,
+                        blockedPanes: blockedPanes)
     }
 
     func reset() {

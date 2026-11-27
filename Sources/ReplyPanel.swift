@@ -129,10 +129,15 @@ final class ReplyPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
         return NSPoint(x: x, y: max(visibleFrame.minY + 8, y))
     }
 
-    func present(blockID: String, title: String?, near anchor: NSRect) {
+    func present(blockID: String, title: String?, extraBlockedCount: Int = 0, near anchor: NSRect) {
         targetBlock = blockID
         let short = blockID.count > 14 ? String(blockID.suffix(10)) : blockID
-        promptLabel.stringValue = L10n.t("Send to", "发送到") + " " + "\(title.flatMap { $0.isEmpty ? nil : $0 } ?? "pane") · \(short)"
+        let base = L10n.t("Send to", "发送到") + " " + "\(title.flatMap { $0.isEmpty ? nil : $0 } ?? "pane") · \(short)"
+        if extraBlockedCount > 0 {
+            promptLabel.stringValue = base + L10n.t(" (+\(extraBlockedCount) waiting)", "（另有 \(extraBlockedCount) 个等待）")
+        } else {
+            promptLabel.stringValue = base
+        }
         field.stringValue = ""
 
         previousApp = NSWorkspace.shared.frontmostApplication

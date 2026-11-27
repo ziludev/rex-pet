@@ -24,7 +24,9 @@ if [ -d Themes ]; then
     name="$(basename "$theme")"
     mkdir -p "$APP/Contents/Resources/Themes/$name"
     for state in idle working blocked done error; do
-      if [ -d "$theme/$state" ]; then
+      if [ -f "$theme/$state.mov" ]; then
+        cp "$theme/$state.mov" "$APP/Contents/Resources/Themes/$name/$state.mov"
+      elif [ -d "$theme/$state" ]; then
         cp -R "$theme/$state" "$APP/Contents/Resources/Themes/$name/$state"
       fi
     done
@@ -43,6 +45,7 @@ done
 
 # shellcheck disable=SC2086
 lipo -create $SLICES -output "$BIN"
+rm -rf build/slices
 
 # Ad-hoc signature: keeps TCC/Accessibility grants stable across rebuilds.
 codesign --force --sign - "$APP" >/dev/null 2>&1 || echo "warning: codesign failed"

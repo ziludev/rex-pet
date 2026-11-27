@@ -2,17 +2,21 @@ import AppKit
 import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let panelSize = NSSize(width: 240, height: 264)
+    private var petSize: PetView.PetSize = PetView.PetSize(rawValue: UserDefaults.standard.string(forKey: "petSize") ?? "") ?? .medium
+    private var panelSize: NSSize { petSize.panelSize }
 
     private var panel: PetPanel!
     private var petView: PetView!
     private var statusItem: NSStatusItem!
+    private let statusIconNormal = CatSprite.menuBarImage(height: 16, blocked: false)
+    private let statusIconBlocked = CatSprite.menuBarImage(height: 16, blocked: true)
     private var pollTimer: Timer?
     private var replyPanel: ReplyPanel?
     private var mouseMonitor: Any?
     private var cursorTimer: Timer?
 
     private var context = PetContext()
+    private var blockedPanes: [PetStateMachine.BlockedPane] = []
     private var watcher: RexWatcher?
     private var watchStatusItem: NSMenuItem?
     private var lastEventAt = Date.distantPast
@@ -21,8 +25,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var launchAtLoginItem: NSMenuItem?
     private var demoItem: NSMenuItem?
     private var clickThroughItem: NSMenuItem?
+    private var notifyBlockedItem: NSMenuItem?
     private var stateMenuItem: NSMenuItem?
     private var themeMenuItem: NSMenuItem?
+    private var sizeMenuItem: NSMenuItem?
     private var revealMenuItem: NSMenuItem?
     private var replyMenuItem: NSMenuItem?
     /// How long a manually written state file outranks the event stream.
@@ -31,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var manualStateUntil: Date?
     private var bubbleGeneration = 0
     private var clickThrough = (UserDefaults.standard.object(forKey: "clickThrough") as? Bool) ?? true
+    private var notifyOnBlocked = (UserDefaults.standard.object(forKey: "notifyOnBlocked") as? Bool) ?? true
     private var selectedTheme = UserDefaults.standard.string(forKey: "selectedTheme") ?? PetView.defaultThemeID
     private var demoMode = UserDefaults.standard.bool(forKey: "demoMode")
     private var demoIndex = 0
@@ -97,11 +104,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func syncFromMachine() {
         let snapshot = machine.snapshot()
+        let wasBlocked = context.state == .blocked
         context.blockID = snapshot.blockID
         context.title = snapshot.title
+        blockedPanes = snapshot.blockedPanes
         updateActionMenuItems()
+        updateStatusChrome()
         guard snapshot.state != context.state else { return }
         apply(snapshot.state)
+        if snapshot.state == .blocked && !wasBlocked && notifyOnBlocked {
+            showBlockedAlertBubble()
+        }
     }
 
     // MARK: - Window
@@ -109,9 +122,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func buildPanel() {
         panel = PetPanel(frame: NSRect(origin: restoreOrigin(), size: panelSize))
         petView = PetView(frame: NSRect(origin: .zero, size: panelSize))
+        petView.petSize = petSize
         petView.selectedTheme = selectedTheme
         petView.onLog = { [weak self] message in self?.debugLog(message) }
         petView.onClick = { [weak self] in self?.handlePetClick() }
+        petView.onReveal = { [weak self] in self?.revealPane() }
         petView.onRightClick = { [weak self] in self?.showMenu() }
         petView.onDragEnd = { [weak self] origin in
             guard let self else { return }
@@ -225,8 +240,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func buildStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         // A template image follows the menu bar's light/dark tint, unlike an emoji.
-        let icon = CatSprite.menuBarImage(height: 16)
-        statusItem.button?.image = icon
+        statusItem.button?.image = statusIconNormal
         statusItem.button?.imagePosition = .imageOnly
 
         let menu = NSMenu()
@@ -245,16 +259,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let themeRoot = NSMenuItem(title: L10n.t("Theme", "主题"), action: nil, keyEquivalent: "")
         let themeMenu = NSMenu(title: L10n.t("Theme", "主题"))
-        let baseThemes: [(id: String, title: String)] = [
-            (PetView.defaultThemeID, L10n.t("Default (Whale Girl)", "默认（鲸鱼娘）")),
-            (PetView.vectorThemeID, L10n.t("Built-in Cat", "内置小猫")),
-        ]
-        for entry in baseThemes {
-            let item = NSMenuItem(title: entry.title, action: #selector(pickTheme(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = entry.id
-            themeMenu.addItem(item)
-        }
+        let defaultItem = NSMenuItem(title: L10n.t("Default (Built-in Cat)", "默认（内置小猫）"), action: #selector(pickTheme(_:)), keyEquivalent: "")
+        defaultItem.target = self
+        defaultItem.representedObject = PetView.defaultThemeID
+        themeMenu.addItem(defaultItem)
+
         let extraThemes = PetView.availableThemes()
         if !extraThemes.isEmpty {
             themeMenu.addItem(.separator())
@@ -269,6 +278,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         themeMenuItem = themeRoot
         menu.addItem(themeRoot)
         updateThemeMenuState()
+
+        let sizeRoot = NSMenuItem(title: L10n.t("Size", "大小"), action: nil, keyEquivalent: "")
+        let sizeMenu = NSMenu(title: L10n.t("Size", "大小"))
+        for size in PetView.PetSize.allCases {
+            let item = NSMenuItem(title: size.label, action: #selector(pickSize(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = size.rawValue
+            sizeMenu.addItem(item)
+        }
+        sizeRoot.submenu = sizeMenu
+        sizeMenuItem = sizeRoot
+        menu.addItem(sizeRoot)
+        updateSizeMenuState()
 
         let watchItem = NSMenuItem(title: L10n.t("rex events: not running", "rex events：未运行"), action: nil, keyEquivalent: "")
         watchItem.isEnabled = false
@@ -294,6 +316,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.demoItem = demoItem
         demoItem.state = demoMode ? .on : .off
         menu.addItem(demoItem)
+
+        let notifyItem = NSMenuItem(title: L10n.t("Notify bubble when blocked", "等待确认时气泡提醒"), action: #selector(toggleNotifyBlocked), keyEquivalent: "")
+        notifyItem.target = self
+        notifyBlockedItem = notifyItem
+        notifyItem.state = notifyOnBlocked ? .on : .off
+        menu.addItem(notifyItem)
 
         let clickItem = NSMenuItem(title: L10n.t("Click through transparent areas", "透明区域点击穿透"), action: #selector(toggleClickThrough), keyEquivalent: "")
         clickItem.target = self
@@ -330,11 +358,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem.menu = menu
         updateActionMenuItems()
+        updateStatusChrome()
     }
 
     private func updateActionMenuItems() {
         revealMenuItem?.isEnabled = context.blockID != nil
-        replyMenuItem?.isEnabled = context.state == .blocked && context.blockID != nil
+        let isBlocked = context.state == .blocked && context.blockID != nil
+        replyMenuItem?.isEnabled = isBlocked
+
+        if blockedPanes.count > 1 {
+            replyMenuItem?.title = L10n.t("Reply to blocked panes (\(blockedPanes.count))…", "回复阻塞分屏 (\(blockedPanes.count))…")
+            let sub = NSMenu(title: replyMenuItem?.title ?? "")
+            for pane in blockedPanes {
+                let short = pane.blockID.count > 14 ? String(pane.blockID.suffix(10)) : pane.blockID
+                let title = (pane.title.flatMap { $0.isEmpty ? nil : $0 } ?? "pane") + " · \(short)"
+                let item = NSMenuItem(title: title, action: #selector(replySpecificPane(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = pane.blockID
+                sub.addItem(item)
+            }
+            replyMenuItem?.submenu = sub
+        } else {
+            replyMenuItem?.title = L10n.t("Reply to the blocked pane…", "回复阻塞分屏…")
+            replyMenuItem?.submenu = nil
+        }
+    }
+
+    private func updateStatusChrome() {
+        let blocked = context.state == .blocked
+        statusItem?.button?.image = blocked ? statusIconBlocked : statusIconNormal
+        let titleSuffix = context.title.flatMap { $0.isEmpty ? nil : " · \($0)" } ?? ""
+        let countSuffix = blocked && blockedPanes.count > 1 ? " (\(blockedPanes.count))" : ""
+        statusItem?.button?.toolTip = "Rex Pet — \(context.state.label)\(titleSuffix)\(countSuffix)"
     }
 
     private func showMenu() {
@@ -349,6 +404,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "capybara": return L10n.t("Capybara", "卡皮巴拉 (capybara)")
         case "penguin": return L10n.t("Penguin", "小企鹅 (penguin)")
         case "retro-robot": return L10n.t("Retro Robot", "复古小机器人 (retro-robot)")
+        case PetView.whaleThemeID: return L10n.t("Whale Girl", "鲸鱼娘 (whale-girl)")
         default: return id
         }
     }
@@ -366,6 +422,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.set(themeID, forKey: "selectedTheme")
         petView.selectedTheme = themeID
         updateThemeMenuState()
+    }
+
+    private func updateSizeMenuState() {
+        guard let sizeMenu = sizeMenuItem?.submenu else { return }
+        for item in sizeMenu.items {
+            item.state = (item.representedObject as? String) == petSize.rawValue ? .on : .off
+        }
+    }
+
+    @objc private func pickSize(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let next = PetView.PetSize(rawValue: raw),
+              next != petSize else { return }
+        let oldFrame = panel.frame
+        petSize = next
+        UserDefaults.standard.set(next.rawValue, forKey: "petSize")
+        petView.petSize = next
+        updateSizeMenuState()
+
+        let newSize = next.panelSize
+        // Anchor bottom-center so growing/shrinking keeps the pet's feet in place.
+        let anchoredOrigin = NSPoint(
+            x: round(oldFrame.midX - newSize.width / 2),
+            y: oldFrame.minY
+        )
+        let fixed = clampOrigin(anchoredOrigin)
+        panel.setFrame(NSRect(origin: fixed, size: newSize), display: true)
+        petView.frame = NSRect(origin: .zero, size: newSize)
+        UserDefaults.standard.set("\(fixed.x),\(fixed.y)", forKey: "petOrigin")
+    }
+
+    @objc private func toggleNotifyBlocked() {
+        notifyOnBlocked.toggle()
+        UserDefaults.standard.set(notifyOnBlocked, forKey: "notifyOnBlocked")
+        notifyBlockedItem?.state = notifyOnBlocked ? .on : .off
     }
 
     @objc private func pickState(_ sender: NSMenuItem) {
@@ -489,10 +580,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func replyBlocked() {
         if context.state == .blocked, let block = context.blockID {
-            showReply(block: block)
+            showReply(block: block, title: context.title)
         } else {
             showBubble(L10n.t("No pane is blocked right now", "当前没有阻塞分屏"))
         }
+    }
+
+    @objc private func replySpecificPane(_ sender: NSMenuItem) {
+        guard let block = sender.representedObject as? String else { return }
+        let title = blockedPanes.first(where: { $0.blockID == block })?.title
+        showReply(block: block, title: title)
     }
 
     // MARK: - State
@@ -532,11 +629,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let mtime = stateFileMTime(), Date().timeIntervalSince(mtime) < Self.overrideTTL else { return false }
         let loaded = PetContext.load()
         if loaded.state != context.state || loaded.blockID != context.blockID || loaded.title != context.title {
+            let wasBlocked = context.state == .blocked
             context.blockID = loaded.blockID
             context.title = loaded.title
+            blockedPanes = []
             machine.reset()
             debugLog("file state=\(loaded.state.rawValue)")
             apply(loaded.state)
+            if loaded.state == .blocked && !wasBlocked && notifyOnBlocked {
+                showBlockedAlertBubble()
+            }
         }
         return true
     }
@@ -564,6 +666,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         context.state = state
         petView.petState = state
         updateActionMenuItems()
+        updateStatusChrome()
         if let stateMenu = stateMenuItem?.submenu {
             for item in stateMenu.items {
                 item.state = (item.representedObject as? String) == state.rawValue ? .on : .off
@@ -571,18 +674,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func showBlockedAlertBubble() {
+        let title = context.title.flatMap { $0.isEmpty ? nil : " · \($0)" } ?? ""
+        let extra = blockedPanes.count > 1 ? " (+\(blockedPanes.count - 1))" : ""
+        showBubble(PetState.blocked.label + title + extra, seconds: 3.5)
+    }
+
     // MARK: - Interaction
 
     private func handlePetClick() {
         if context.state == .blocked, let block = context.blockID {
-            showReply(block: block)
+            showReply(block: block, title: context.title)
             return
         }
         let title = context.title.flatMap { $0.isEmpty ? nil : " · \($0)" } ?? ""
         showBubble(context.state.label + title)
     }
 
-    private func showReply(block: String) {
+    private func showReply(block: String, title: String?) {
         let reply = replyPanel ?? ReplyPanel()
         replyPanel = reply
         reply.onSend = { [weak self] payload in self?.sendReply(block: block, payload: payload) }
@@ -591,7 +700,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.updateClickThrough()
             self?.debugLog("reply closed")
         }
-        reply.present(blockID: block, title: context.title, near: petView.screenAnchor)
+        let extra = max(0, blockedPanes.filter { $0.blockID != block }.count)
+        reply.present(blockID: block, title: title, extraBlockedCount: extra, near: petView.screenAnchor)
         updateClickThrough(forceInteractive: true)
         debugLog("reply presented block=\(block)")
     }
