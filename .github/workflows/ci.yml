@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: ./build.sh
+
+      # The checks are headless on purpose: no window server on the runner.
+      - name: Self-test
+        env:
+          REX_PET_LANG: en
+        run: ./build/RexPet.app/Contents/MacOS/RexPet --selftest
+
+      # A release is only useful if both slices exist, and cross-compiling is the
+      # part of build.sh nobody exercises by hand.
+      - name: Universal build
+        run: |
+          ARCHS="arm64 x86_64" ./build.sh
+          lipo -archs build/RexPet.app/Contents/MacOS/RexPet | tee /tmp/archs
+          grep -q arm64 /tmp/archs
+          grep -q x86_64 /tmp/archs
+
+      - name: Self-test under Rosetta
+        env:
+          REX_PET_LANG: en
+        run: arch -x86_64 ./build/RexPet.app/Contents/MacOS/RexPet --selftest
+
+      - name: Release artifact packages
+        run: |
+          ./tools/release.sh
+          unzip -l build/RexPet-*.zip | grep -q "RexPet.app/Contents/MacOS/RexPet"
