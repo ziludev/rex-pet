@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var demoItem: NSMenuItem?
     private var clickThroughItem: NSMenuItem?
     private var notifyBlockedItem: NSMenuItem?
+    private var soundOnDoneItem: NSMenuItem?
     private var stateMenuItem: NSMenuItem?
     private var themeMenuItem: NSMenuItem?
     private var sizeMenuItem: NSMenuItem?
@@ -38,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var bubbleGeneration = 0
     private var clickThrough = (UserDefaults.standard.object(forKey: "clickThrough") as? Bool) ?? true
     private var notifyOnBlocked = (UserDefaults.standard.object(forKey: "notifyOnBlocked") as? Bool) ?? true
+    private var soundOnDone = (UserDefaults.standard.object(forKey: "soundOnDone") as? Bool) ?? true
     private var selectedTheme = UserDefaults.standard.string(forKey: "selectedTheme") ?? PetView.defaultThemeID
     private var demoMode = UserDefaults.standard.bool(forKey: "demoMode")
     private var demoIndex = 0
@@ -329,6 +331,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clickItem.state = clickThrough ? .on : .off
         menu.addItem(clickItem)
 
+        let soundItem = NSMenuItem(title: L10n.t("Chime when a pane finishes", "运行完成时响一声"), action: #selector(toggleSoundOnDone), keyEquivalent: "")
+        soundItem.target = self
+        soundItem.state = soundOnDone ? .on : .off
+        soundOnDoneItem = soundItem
+        menu.addItem(soundItem)
+
         let resetItem = NSMenuItem(title: L10n.t("Reset position", "复位位置"), action: #selector(resetPosition), keyEquivalent: "")
         resetItem.target = self
         menu.addItem(resetItem)
@@ -457,6 +465,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notifyOnBlocked.toggle()
         UserDefaults.standard.set(notifyOnBlocked, forKey: "notifyOnBlocked")
         notifyBlockedItem?.state = notifyOnBlocked ? .on : .off
+    }
+
+    @objc private func toggleSoundOnDone() {
+        soundOnDone.toggle()
+        UserDefaults.standard.set(soundOnDone, forKey: "soundOnDone")
+        soundOnDoneItem?.state = soundOnDone ? .on : .off
     }
 
     @objc private func pickState(_ sender: NSMenuItem) {
@@ -663,7 +677,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func apply(_ state: PetState) {
+        let previous = context.state
         context.state = state
+        if PetChime.shouldPlay(from: previous, to: state, enabled: soundOnDone) {
+            PetChime.play()
+            debugLog("chime done")
+        }
         petView.petState = state
         updateActionMenuItems()
         updateStatusChrome()

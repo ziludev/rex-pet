@@ -265,6 +265,11 @@ enum SelfTest {
                "pet size presets match expected dimensions")
         expect(CatSprite.menuBarImage(height: 16, blocked: false).isTemplate && CatSprite.menuBarImage(height: 16, blocked: true).isTemplate,
                "menu bar icons render as template images in both normal and blocked states")
+        expect(PetChime.shouldPlay(from: .working, to: .done, enabled: true), "finishing a pane chimes")
+        expect(!PetChime.shouldPlay(from: .done, to: .done, enabled: true), "a re-sent done does not chime again")
+        expect(!PetChime.shouldPlay(from: .working, to: .done, enabled: false), "the chime follows its switch")
+        expect(!PetChime.shouldPlay(from: .working, to: .blocked, enabled: true) && !PetChime.shouldPlay(from: .done, to: .error, enabled: true),
+               "blocked and error stay silent")
     }
 
     // MARK: - Language

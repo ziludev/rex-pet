@@ -72,7 +72,10 @@ plus its SHA-256 — that is exactly what a release uploads.
 - **Left click** — idle/working: a compact status bubble naming the state and the pane. Blocked: the reply panel.
 - **Double-click (or Option + click)** — focuses the active pane directly in Rex.
 - **Drag** — moves the window; the position is remembered in `UserDefaults`.
-- **Menu bar icon** — shows a badge dot when blocked; opens a menu to set state, theme, size (`Small / Medium / Large`), demo mode, blocked bubble alerts, click-through, reset position, reply to any blocked pane, pick the `rex` binary, launch at login, or quit. The same menu is on a right click.
+- **A finished pane chimes once** — one short system sound when a pane goes to `done`, nothing for
+  any other state, and a menu switch to turn it off. This is why `rex-beacon`'s `done` notification can
+  stay off: the pet already shows it, and the chime is the part that reaches you when you look away.
+- **Menu bar icon** — shows a badge dot when blocked; opens a menu to set state, theme, size (`Small / Medium / Large`), demo mode, blocked bubble alerts, the completion chime, click-through, reset position, reply to any blocked pane, pick the `rex` binary, launch at login, or quit. The same menu is on a right click.
 
 The reply panel is a small HUD that becomes the key window just long enough to type, then hands
 focus back to whatever you were using:
