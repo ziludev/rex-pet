@@ -5,11 +5,12 @@ by Superlogical. A small character sits in the corner of your desktop, mirrors w
 are doing, and — when one of them is blocked waiting for you — lets you answer without switching
 panes.
 
-![One clip per state](docs/demo.gif)
+![Retro CRT Robot cycling through all five states](docs/demo.gif)
 
 Zero dependencies: plain AppKit, no Xcode project, no third-party packages. `./build.sh` and you have
-an `.app`. The character is a whale girl, art from [dsh-pet](https://github.com/PC2005-cloud/dsh-pet)
-(MIT); delete `Assets/` and the cat drawn in code takes over.
+an `.app`. Five custom characters — a **Retro CRT Robot**, **Red Panda**, **Shiba Inu**, **Capybara**,
+and **Penguin** — are bundled in [`Themes/`](Themes/README.md) and switchable right from the **Theme**
+menu, alongside the built-in vector cat drawn in code (`CatSprite`).
 
 ## Why
 
@@ -95,19 +96,19 @@ rex block call -b <block> write '{"data":"y\r"}'
 
 ## States
 
-![states](docs/states.png)
+![Retro CRT Robot states](docs/states.png)
 
-| State | The clip shows | The drawn cat shows | Meaning |
+| State | Retro CRT Robot | Built-in Cat | Meaning |
 | --- | --- | --- | --- |
-| `idle` | a breathing loop | no halo | nothing is running |
-| `working` | typing at a tiny laptop | amber halo, `~` badge | at least one pane is busy |
-| `blocked` | slapping the floor with her tail | red halo, `!` badge, no blinking | a pane wants permission or an answer |
-| `done` | arms up, stars around her | green halo, `✓` badge | a command finished, cleared or not |
-| `error` | magenta halo, `×` badge | a command exited non-zero |
+| `idle` | cyan pixel eyes glancing & blinking | no halo | nothing is running |
+| `working` | typing on keyboard, `LOADING...` bar filling | amber halo, `~` badge | at least one pane is busy |
+| `blocked` | flashing coral `! !` eyes, antenna alert | red halo, `!` badge, no blinking | a pane wants permission or an answer |
+| `done` | mint `^ ^` celebration hop & stars | green halo, `✓` badge | a command finished, cleared or not |
+| `error` | glitching `× ×` screen & sweat drop | magenta halo, `×` badge | a command exited non-zero |
 
-The body is never tinted: the halo and the badge carry the state, so the pet stays one coherent
-character. On light wallpapers the silhouette survives thanks to a soft drop shadow and a 1.2 pt
-translucent outline.
+On the built-in vector cat, the body is never tinted: the halo and the badge carry the state, so it
+stays one coherent character. On light wallpapers the silhouette survives thanks to a soft drop shadow
+and a 1.2 pt translucent outline.
 
 ## How it works
 
@@ -149,28 +150,32 @@ your panes, the pet is amber — that is a report, not a bug.
 | --- | --- |
 | `~/.cache/rex-pet/state` | manual override: `idle` / `working` / `blocked` / `done` / `error`, wins over the event stream for 60 s after it is written |
 | `~/.cache/rex-pet/context.json` | same, plus `{"block":"block:…","title":"…"}` so a demo click has somewhere to reply |
-| `~/Library/Application Support/rex-pet/Assets/<state>.mov` | optional clip with alpha, looped; beats frames and the vector cat |
-| `~/Library/Application Support/rex-pet/Assets/<state>/*.png` | optional image sequence, 12 fps; beats the vector cat |
+| `~/Library/Application Support/rex-pet/Assets/<state>.mov` | optional clip with alpha, looped; beats PNG frames and the vector cat |
+| `~/Library/Application Support/rex-pet/Assets/<state>/*.png` | optional image sequence (12 fps, or 18 fps for 20+ frames); beats bundled default clips |
 
 `./build/RexPet.app/Contents/MacOS/RexPet --selftest` runs the headless checks (state aggregation,
-language switch) and exits non-zero on failure; CI runs exactly that.
+event parsing, asset resolution, reply placement and language switch) and exits non-zero on failure;
+CI runs exactly that.
 
 `REX_PET_REX_BIN` overrides the `rex` lookup, `REX_PET_LANG=en|zh` overrides the UI language,
 `REX_PET_DEBUG=1` logs to stderr.
 
-## Other pets
+## Bundled themes
 
-Five ready-made characters live in [`Themes/`](Themes/README.md) — red panda, shiba, capybara,
-penguin and a CRT robot — each a 16-frame, 12 fps PNG sequence per state. One command swaps the pet
-without touching the app:
+Five custom animated characters live in [`Themes/`](Themes/README.md) — **Red Panda**, **Shiba Inu**,
+**Capybara**, **Penguin**, and **Retro CRT Robot** — each with 24 articulated frames per state (18 fps)
+and character-specific animations (wagging tails, flapping wings, bouncing yuzu, live CRT loading bar
+& alternating keyboard typing).
+
+![All five bundled pet themes](Themes/all-themes-preview.png)
+
+Switch themes directly from the **Theme** submenu in the menu bar / right-click menu, or install a
+theme as `.mov` clips into `~/Library/Application Support/rex-pet/Assets/`:
 
 ```sh
-./tools/install-theme.sh shiba        # or red-panda, capybara, penguin, retro-robot
+./tools/install-theme.sh retro-robot   # or red-panda, shiba, capybara, penguin
 ./tools/install-theme.sh --restore-default
 ```
-
-It encodes the frames into the same HEVC-with-alpha clips the app already plays and drops them in
-`~/Library/Application Support/rex-pet/Assets/`, which outranks the bundled whale.
 
 ## Your own art
 
