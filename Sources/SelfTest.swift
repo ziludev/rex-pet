@@ -193,6 +193,13 @@ enum SelfTest {
             // Missing state resolves to vector fallback.
             let res4 = PetView.resolveAsset(for: .error, in: [userRoot, bundledRoot])
             expect(res4 == .vector, "missing asset falls back to vector cat")
+
+            // Named theme isolates roots away from default Assets, and vector theme clears roots.
+            let themeRoots = PetView.assetRoots(forTheme: "shiba", appSupport: tmp, bundleResources: bundledRoot)
+            expect(themeRoots.count == 2 && themeRoots[0].path.hasSuffix("/Themes/shiba"),
+                   "named theme resolves against Themes/<name> instead of default Assets")
+            expect(PetView.assetRoots(forTheme: PetView.vectorThemeID, appSupport: tmp, bundleResources: bundledRoot).isEmpty,
+                   "vector theme skips image/movie asset roots")
         } catch {
             expect(false, "asset resolution setup failed: \(error)")
         }

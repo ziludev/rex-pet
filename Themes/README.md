@@ -1,6 +1,6 @@
 # Rex Pet 主题资源包 (`Themes/`)
 
-这里包含 5 套可直接用于 `rex-pet` 的桌面宠物角色资源包，每套均包含 5 个状态（`idle` / `working` / `blocked` / `done` / `error`），每个状态为 16 帧、12 fps 的 `320×300` 透明通道 PNG 序列帧（带呼吸、眨眼、敲键盘弹跳、提示跳动、胜利跳跃、眩晕抖动等循环动画）。
+这里包含 5 套可直接用于 `rex-pet` 的桌面宠物角色资源包，每套均包含 5 个状态（`idle` / `working` / `blocked` / `done` / `error`），每个状态为 24 帧、18 fps 的 `320×300` 透明通道 PNG 序列帧，且每个角色都配有独立专属动作（落地呼吸、摇尾巴、扑腾翅膀、顶橘子起跳、CRT 像素进度条与表情动画等）。
 
 ![All Themes Preview](all-themes-preview.png)
 

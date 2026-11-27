@@ -32,8 +32,11 @@ fi
 for STATE in idle working blocked done error; do
   STATE_DIR="$THEME_DIR/$STATE"
   [ -d "$STATE_DIR" ] || { echo "Missing state directory: $STATE_DIR" >&2; exit 2; }
-  echo "Encoding $THEME/$STATE -> $TARGET_DIR/$STATE.mov"
-  ffmpeg -v error -y -framerate 12 -i "$STATE_DIR/%03d.png" \
+  COUNT=$(ls -1 "$STATE_DIR"/*.png 2>/dev/null | wc -l | tr -d ' ')
+  IN_FPS=12
+  [ "$COUNT" -ge 20 ] && IN_FPS=18
+  echo "Encoding $THEME/$STATE (${COUNT}f @ ${IN_FPS}fps) -> $TARGET_DIR/$STATE.mov"
+  ffmpeg -v error -y -framerate "$IN_FPS" -i "$STATE_DIR/%03d.png" \
     -vf "fps=24,format=rgba" -f rawvideo -pix_fmt bgra - \
     | "$ENCODER" "$TARGET_DIR/$STATE.mov" 320 300 24 0.75
 done

@@ -17,6 +17,20 @@ if [ -d Assets ]; then
   cp -R Assets "$APP/Contents/Resources/Assets"
 fi
 
+if [ -d Themes ]; then
+  mkdir -p "$APP/Contents/Resources/Themes"
+  for theme in Themes/*/; do
+    [ -d "$theme" ] || continue
+    name="$(basename "$theme")"
+    mkdir -p "$APP/Contents/Resources/Themes/$name"
+    for state in idle working blocked done error; do
+      if [ -d "$theme/$state" ]; then
+        cp -R "$theme/$state" "$APP/Contents/Resources/Themes/$name/$state"
+      fi
+    done
+  done
+fi
+
 mkdir -p build/slices
 SLICES=""
 for arch in $ARCHS; do

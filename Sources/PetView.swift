@@ -20,6 +20,16 @@ final class PetView: NSView {
         case vector
     }
 
+    static let defaultThemeID = "default"
+    static let vectorThemeID = "vector"
+
+    var selectedTheme: String = PetView.defaultThemeID {
+        didSet {
+            guard selectedTheme != oldValue else { return }
+            reloadAssets()
+        }
+    }
+
     var petState: PetState = .idle {
         didSet {
             guard petState != oldValue else { return }
@@ -97,9 +107,13 @@ final class PetView: NSView {
         needsDisplay = true
     }
 
+    private var activeFrameInterval: CFTimeInterval {
+        frames.count >= 20 ? (1.0 / 18.0) : frameInterval
+    }
+
     private func desiredTickInterval() -> CFTimeInterval {
         if movieLayer != nil { return 1.0 }
-        if !frames.isEmpty { return frameInterval }
+        if !frames.isEmpty { return activeFrameInterval }
         return CatSprite.frameInterval(state: petState)
     }
 
@@ -208,7 +222,7 @@ final class PetView: NSView {
 
     private func drawSprite() {
         let now = CACurrentMediaTime()
-        if now - lastFrameSwap >= frameInterval * 0.9 {
+        if now - lastFrameSwap >= activeFrameInterval * 0.9 {
             lastFrameSwap = now
             frameIndex = (frameIndex + 1) % frames.count
         }
@@ -289,13 +303,42 @@ final class PetView: NSView {
         return image
     }
 
-    /// Where art is looked up: the user's own folder first, then the `Assets/` shipped inside the app.
+    /// Where art is looked up: for `"default"`, user `Assets/` then bundled `Assets/`;
+    /// for a named theme, user `Themes/<name>/` then bundled `Themes/<name>/`.
     private var assetRoots: [URL] {
-        var roots = [URL(fileURLWithPath: ("~/Library/Application Support/rex-pet/Assets" as NSString).expandingTildeInPath)]
-        if let bundled = Bundle.main.resourceURL?.appendingPathComponent("Assets") {
+        Self.assetRoots(forTheme: selectedTheme,
+                        appSupport: URL(fileURLWithPath: ("~/Library/Application Support/rex-pet" as NSString).expandingTildeInPath),
+                        bundleResources: Bundle.main.resourceURL)
+    }
+
+    static func assetRoots(forTheme theme: String, appSupport: URL, bundleResources: URL?) -> [URL] {
+        if theme == vectorThemeID { return [] }
+        if theme != defaultThemeID {
+            var roots = [appSupport.appendingPathComponent("Themes").appendingPathComponent(theme)]
+            if let bundled = bundleResources?.appendingPathComponent("Themes").appendingPathComponent(theme) {
+                roots.append(bundled)
+            }
+            return roots
+        }
+        var roots = [appSupport.appendingPathComponent("Assets")]
+        if let bundled = bundleResources?.appendingPathComponent("Assets") {
             roots.append(bundled)
         }
         return roots
+    }
+
+    static func availableThemes(appSupport: URL = URL(fileURLWithPath: ("~/Library/Application Support/rex-pet" as NSString).expandingTildeInPath),
+                                bundleResources: URL? = Bundle.main.resourceURL) -> [String] {
+        let fm = FileManager.default
+        var names = Set<String>()
+        for base in [appSupport.appendingPathComponent("Themes"), bundleResources?.appendingPathComponent("Themes")].compactMap({ $0 }) {
+            guard let items = try? fm.contentsOfDirectory(at: base, includingPropertiesForKeys: [.isDirectoryKey]) else { continue }
+            for item in items {
+                let isDir = (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                if isDir { names.insert(item.lastPathComponent) }
+            }
+        }
+        return names.sorted()
     }
 
     /// Resolves the highest-priority asset per root (`mov` before `png` within the same root,

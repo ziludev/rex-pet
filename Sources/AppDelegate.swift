@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var demoItem: NSMenuItem?
     private var clickThroughItem: NSMenuItem?
     private var stateMenuItem: NSMenuItem?
+    private var themeMenuItem: NSMenuItem?
     private var revealMenuItem: NSMenuItem?
     private var replyMenuItem: NSMenuItem?
     /// How long a manually written state file outranks the event stream.
@@ -30,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var manualStateUntil: Date?
     private var bubbleGeneration = 0
     private var clickThrough = (UserDefaults.standard.object(forKey: "clickThrough") as? Bool) ?? true
+    private var selectedTheme = UserDefaults.standard.string(forKey: "selectedTheme") ?? PetView.defaultThemeID
     private var demoMode = UserDefaults.standard.bool(forKey: "demoMode")
     private var demoIndex = 0
     private var lastDemoSwap: CFTimeInterval = 0
@@ -107,6 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func buildPanel() {
         panel = PetPanel(frame: NSRect(origin: restoreOrigin(), size: panelSize))
         petView = PetView(frame: NSRect(origin: .zero, size: panelSize))
+        petView.selectedTheme = selectedTheme
         petView.onLog = { [weak self] message in self?.debugLog(message) }
         petView.onClick = { [weak self] in self?.handlePetClick() }
         petView.onRightClick = { [weak self] in self?.showMenu() }
@@ -240,6 +243,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stateMenuItem = stateRoot
         menu.addItem(stateRoot)
 
+        let themeRoot = NSMenuItem(title: L10n.t("Theme", "主题"), action: nil, keyEquivalent: "")
+        let themeMenu = NSMenu(title: L10n.t("Theme", "主题"))
+        let baseThemes: [(id: String, title: String)] = [
+            (PetView.defaultThemeID, L10n.t("Default (Whale Girl)", "默认（鲸鱼娘）")),
+            (PetView.vectorThemeID, L10n.t("Built-in Cat", "内置小猫")),
+        ]
+        for entry in baseThemes {
+            let item = NSMenuItem(title: entry.title, action: #selector(pickTheme(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = entry.id
+            themeMenu.addItem(item)
+        }
+        let extraThemes = PetView.availableThemes()
+        if !extraThemes.isEmpty {
+            themeMenu.addItem(.separator())
+            for id in extraThemes {
+                let item = NSMenuItem(title: themeDisplayName(id), action: #selector(pickTheme(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = id
+                themeMenu.addItem(item)
+            }
+        }
+        themeRoot.submenu = themeMenu
+        themeMenuItem = themeRoot
+        menu.addItem(themeRoot)
+        updateThemeMenuState()
+
         let watchItem = NSMenuItem(title: L10n.t("rex events: not running", "rex events：未运行"), action: nil, keyEquivalent: "")
         watchItem.isEnabled = false
         watchStatusItem = watchItem
@@ -310,6 +340,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showMenu() {
         guard let menu = statusItem.menu else { return }
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+
+    private func themeDisplayName(_ id: String) -> String {
+        switch id {
+        case "red-panda": return L10n.t("Red Panda", "小熊猫 (red-panda)")
+        case "shiba": return L10n.t("Shiba Inu", "柴犬 (shiba)")
+        case "capybara": return L10n.t("Capybara", "卡皮巴拉 (capybara)")
+        case "penguin": return L10n.t("Penguin", "小企鹅 (penguin)")
+        case "retro-robot": return L10n.t("Retro Robot", "复古小机器人 (retro-robot)")
+        default: return id
+        }
+    }
+
+    private func updateThemeMenuState() {
+        guard let themeMenu = themeMenuItem?.submenu else { return }
+        for item in themeMenu.items {
+            item.state = (item.representedObject as? String) == selectedTheme ? .on : .off
+        }
+    }
+
+    @objc private func pickTheme(_ sender: NSMenuItem) {
+        guard let themeID = sender.representedObject as? String else { return }
+        selectedTheme = themeID
+        UserDefaults.standard.set(themeID, forKey: "selectedTheme")
+        petView.selectedTheme = themeID
+        updateThemeMenuState()
     }
 
     @objc private func pickState(_ sender: NSMenuItem) {
