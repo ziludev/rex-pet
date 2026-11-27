@@ -52,9 +52,11 @@ final class PetStateMachine {
             return
 
         case .working:
-            // A command that just reported done keeps the check mark for a moment:
+            // A command that just reported done/error keeps the badge for a moment:
             // shells keep emitting progress reports while they tear down.
-            if let existing = entries[key], existing.state != .working,
+            // A blocked pane that just received input, however, must switch to working immediately.
+            if let existing = entries[key],
+               existing.state == .done || existing.state == .error,
                now.timeIntervalSince(existing.updatedAt) < quietWindow {
                 return
             }

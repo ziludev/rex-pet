@@ -4,14 +4,22 @@ import ImageIO
 
 /// Draws the pet plus an optional speech bubble, and handles drag / click.
 ///
-/// Three render modes, in this order of preference:
-/// 1. An HEVC-with-alpha clip at `~/Library/Application Support/rex-pet/Assets/<state>.mov`
-///    (what `tools/make-pet.sh` produces), looped by AVPlayer.
-/// 2. Sprite frames from `.../Assets/<state>/*.png`, played at 12 fps.
+/// Three render modes, resolved per asset root (`~/Library/Application Support/rex-pet/Assets`
+/// before the bundled `Assets/`):
+/// 1. An HEVC-with-alpha clip at `<root>/<state>.mov` (what `tools/make-pet.sh` produces),
+///    looped by AVPlayer.
+/// 2. Sprite frames from `<root>/<state>/*.png`, played at 12 fps.
 /// 3. The vector cat from `CatSprite`, animated in code (default).
 ///
-/// Generated art therefore wins over the built-in cat without touching this file.
+/// Any custom clip or PNG frame folder in the user's Assets folder therefore overrides
+/// the bundled clips without modifying the app bundle.
 final class PetView: NSView {
+    enum AssetSource: Equatable {
+        case movie(URL, Date?)
+        case frames(URL, Date?)
+        case vector
+    }
+
     var petState: PetState = .idle {
         didSet {
             guard petState != oldValue else { return }
@@ -21,7 +29,10 @@ final class PetView: NSView {
     }
 
     var bubbleText: String? {
-        didSet { needsDisplay = true }
+        didSet {
+            guard bubbleText != oldValue else { return }
+            needsDisplay = true
+        }
     }
 
     var onLog: ((String) -> Void)?
@@ -34,17 +45,24 @@ final class PetView: NSView {
     private let frameInterval: CFTimeInterval = 1.0 / 12.0
 
     private var frames: [CGImage] = []
+    private var framesCache: [URL: (mtime: Date?, images: [CGImage])] = [:]
     /// Clips AVPlayer refuses to open are remembered, so a bad file in Assets
-    /// falls back to the drawn cat instead of retrying on every state change.
+    /// falls back to PNG frames or the drawn cat instead of retrying on every state change.
     private var failedMovies: Set<URL> = []
     private var itemObservation: NSKeyValueObservation?
+    private var readyObservation: NSKeyValueObservation?
     private var moviePlayer: AVQueuePlayer?
     private var movieLooper: AVPlayerLooper?
     private var movieLayer: AVPlayerLayer?
+    private var outgoingPlayer: AVQueuePlayer?
+    private var outgoingLooper: AVPlayerLooper?
+    private var outgoingLayer: AVPlayerLayer?
     private var loadedMovieURL: URL?
+    private var loadedMovieMtime: Date?
     private var frameIndex = 0
     private var lastFrameSwap: CFTimeInterval = 0
     private var ticker: Timer?
+    private var tickerInterval: CFTimeInterval = 0
     private let bornAt = CACurrentMediaTime()
 
     private var dragStart: NSPoint = .zero
@@ -55,29 +73,51 @@ final class PetView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        startTicking()
         loadAsset()
+        startTicking()
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
     deinit {
         ticker?.invalidate()
+        itemObservation = nil
+        readyObservation = nil
         moviePlayer?.pause()
+        outgoingPlayer?.pause()
+    }
+
+    func reloadAssets() {
+        failedMovies.removeAll()
+        framesCache.removeAll()
+        artCache.removeAll()
+        loadedMovieURL = nil
+        loadedMovieMtime = nil
+        loadAsset()
+        needsDisplay = true
+    }
+
+    private func desiredTickInterval() -> CFTimeInterval {
+        if movieLayer != nil { return 1.0 }
+        if !frames.isEmpty { return frameInterval }
+        return CatSprite.frameInterval(state: petState)
     }
 
     private func startTicking() {
+        let interval = desiredTickInterval()
+        if ticker != nil, abs(tickerInterval - interval) < 0.001 { return }
+
         ticker?.invalidate()
-        // A playing clip is composited by AVPlayerLayer, so nothing here needs a
-        // redraw; waking 30 times a second for an empty draw is battery for free.
-        // The slow tick still samples playback, which is how a stalled clip is caught.
-        let interval: CFTimeInterval = movieLayer == nil ? 1.0 / 30.0 : 1.0
+        tickerInterval = interval
         // .common mode keeps the animation alive while a drag tracking loop runs.
+        // A playing .mov is composited by AVPlayerLayer, so waking only once per second
+        // for stall detection avoids unnecessary 30 Hz repaints.
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             guard let self else { return }
             if self.movieLayer == nil { self.needsDisplay = true }
             self.reportPlayback()
         }
+        timer.tolerance = interval >= 1.0 ? 0.25 : interval * 0.15
         RunLoop.main.add(timer, forMode: .common)
         ticker = timer
     }
@@ -86,18 +126,18 @@ final class PetView: NSView {
     private var lastMovieTime: Double = -1
     private var stalledReports = 0
 
-    /// One line every two seconds: enough to prove the clip is really running.
+    /// Samples playback periodically to log activity and catch clips that stall after opening.
     private func reportPlayback() {
-        guard let player = moviePlayer, let onLog else { return }
+        guard let player = moviePlayer else { return }
         let now = CACurrentMediaTime()
         guard now - lastPlaybackReport > 2 else { return }
         lastPlaybackReport = now
         let time = player.currentTime().seconds
-        onLog("movie rate=\(player.rate) t=\(String(format: "%.2f", time))")
+        onLog?("movie rate=\(player.rate) t=\(String(format: "%.2f", time))")
 
         // A file can open and still never advance — a truncated download or a
         // codec macOS has no decoder for. Two reports without progress is enough
-        // to stop trusting it; the drawn cat covers the state from then on.
+        // to stop trusting it; fallback covers the state from then on.
         if time.isNaN || time == lastMovieTime {
             stalledReports += 1
         } else {
@@ -105,10 +145,11 @@ final class PetView: NSView {
         }
         lastMovieTime = time
         if stalledReports >= 2, let url = loadedMovieURL {
-            onLog("clip \(url.lastPathComponent) is not playing; falling back")
+            onLog?("clip \(url.lastPathComponent) is not playing; falling back")
             failedMovies.insert(url)
             stalledReports = 0
             teardownMovie()
+            loadAsset()
             needsDisplay = true
         }
     }
@@ -119,14 +160,28 @@ final class PetView: NSView {
         NSRect(x: (bounds.width - petSide) / 2, y: 0, width: petSide, height: petSide)
     }
 
-    private var bubbleRect: NSRect {
-        NSRect(x: 8, y: bounds.height - bubbleHeight, width: bounds.width - 16, height: bubbleHeight - 10)
+    private var currentBubbleRect: NSRect {
+        let maxW = bounds.width - 16
+        let height: CGFloat
+        if let text = bubbleText {
+            let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12, weight: .medium)]
+            let measured = (text as NSString).boundingRect(
+                with: NSSize(width: maxW - 16, height: bubbleHeight - 10),
+                options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+                attributes: attrs
+            )
+            height = min(bubbleHeight - 8, max(30, ceil(measured.height) + 14))
+        } else {
+            height = bubbleHeight - 10
+        }
+        return NSRect(x: 8, y: bounds.height - height - 8, width: maxW, height: height)
     }
 
     private var hitRegion: NSRect {
-        // Generated clips carry their own empty margin, so be forgiving.
-        var region = petRect.insetBy(dx: movieLayer == nil ? 18 : 24, dy: movieLayer == nil ? 18 : 24)
-        if bubbleText != nil { region = region.union(bubbleRect) }
+        // Generated clips and PNG packs carry their own empty margin, so be forgiving.
+        let inset: CGFloat = (movieLayer == nil && frames.isEmpty) ? 18 : 24
+        var region = petRect.insetBy(dx: inset, dy: inset)
+        if bubbleText != nil { region = region.union(currentBubbleRect) }
         return region
     }
 
@@ -153,7 +208,7 @@ final class PetView: NSView {
 
     private func drawSprite() {
         let now = CACurrentMediaTime()
-        if now - lastFrameSwap > frameInterval {
+        if now - lastFrameSwap >= frameInterval * 0.9 {
             lastFrameSwap = now
             frameIndex = (frameIndex + 1) % frames.count
         }
@@ -169,10 +224,22 @@ final class PetView: NSView {
     }
 
     private func drawBubble(_ text: String) {
-        let rect = bubbleRect
+        let rect = currentBubbleRect
         let path = NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10)
-        NSColor(white: 1.0, alpha: 0.94).setFill()
+
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowBlurRadius = 6
+        shadow.shadowOffset = NSSize(width: 0, height: -2)
+        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.18)
+        shadow.set()
+        NSColor(white: 1.0, alpha: 0.95).setFill()
         path.fill()
+        NSGraphicsContext.restoreGraphicsState()
+
+        NSColor(white: 0.0, alpha: 0.14).setStroke()
+        path.lineWidth = 1
+        path.stroke()
 
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 12, weight: .medium),
@@ -188,14 +255,13 @@ final class PetView: NSView {
 
     // MARK: - Assets
 
-    /// The drawn cat costs ~5 ms a frame, which is real battery for a desk pet that
-    /// sits there for hours. Render it once per pose and animate only the offset.
-    private var artCache: NSImage?
-    private var artCacheKey = ""
+    /// The drawn cat costs ~5 ms a frame, so render once per (state, blink) pose and
+    /// animate only the vertical offset.
+    private var artCache: [String: NSImage] = [:]
 
     private func art(for state: PetState, blink: Bool) -> NSImage? {
         let key = "\(state.rawValue)-\(blink)"
-        if key == artCacheKey, let cached = artCache { return cached }
+        if let cached = artCache[key] { return cached }
 
         let side = petSide
         let pixels = Int(side * 2) // retina; the cache is blitted 1:1 otherwise
@@ -219,13 +285,11 @@ final class PetView: NSView {
 
         let image = NSImage(size: NSSize(width: side, height: side))
         image.addRepresentation(rep)
-        artCache = image
-        artCacheKey = key
+        artCache[key] = image
         return image
     }
 
-    /// Where art is looked up: the user's own folder first, so a clip dropped there
-    /// replaces the bundled one, then the `Assets/` shipped inside the app.
+    /// Where art is looked up: the user's own folder first, then the `Assets/` shipped inside the app.
     private var assetRoots: [URL] {
         var roots = [URL(fileURLWithPath: ("~/Library/Application Support/rex-pet/Assets" as NSString).expandingTildeInPath)]
         if let bundled = Bundle.main.resourceURL?.appendingPathComponent("Assets") {
@@ -234,34 +298,61 @@ final class PetView: NSView {
         return roots
     }
 
-    private func assetURL(_ relative: String) -> URL? {
-        for root in assetRoots {
-            let candidate = root.appendingPathComponent(relative)
-            if FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+    /// Resolves the highest-priority asset per root (`mov` before `png` within the same root,
+    /// and user root before bundled root). Tested by `--selftest`.
+    static func resolveAsset(for state: PetState, in roots: [URL], failedMovies: Set<URL> = []) -> AssetSource {
+        let fm = FileManager.default
+        let stateName = state.rawValue
+        let movieCandidates = ["\(stateName).mov", "mov/\(stateName).mov", "\(stateName)/loop.mov"]
+
+        for root in roots {
+            for rel in movieCandidates {
+                let candidate = root.appendingPathComponent(rel)
+                if !failedMovies.contains(candidate), fm.fileExists(atPath: candidate.path) {
+                    return .movie(candidate, modificationDate(of: candidate))
+                }
+            }
+            let dir = root.appendingPathComponent(stateName)
+            if let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil),
+               files.contains(where: { $0.pathExtension.lowercased() == "png" }) {
+                return .frames(dir, modificationDate(of: dir))
+            }
         }
-        return nil
+        return .vector
+    }
+
+    private static func modificationDate(of url: URL) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
     }
 
     private func loadAsset() {
-        loadFrames()
-        loadMovie()
+        switch Self.resolveAsset(for: petState, in: assetRoots, failedMovies: failedMovies) {
+        case .movie(let url, let mtime):
+            frames = []
+            frameIndex = 0
+            loadMovie(url: url, mtime: mtime)
+        case .frames(let dir, let mtime):
+            teardownMovie()
+            loadFrames(from: dir, mtime: mtime)
+        case .vector:
+            teardownMovie()
+            frames = []
+            frameIndex = 0
+        }
+        startTicking()
     }
 
-    /// A state's own clip beats its frame folder: one file, 24–30 fps, no decode cost per frame.
-    private func loadMovie() {
-        let found = assetURL("\(petState.rawValue).mov")
-            ?? assetURL("mov/\(petState.rawValue).mov")
-            ?? assetURL("\(petState.rawValue)/loop.mov")
-        guard found != loadedMovieURL else { return }
+    private func loadMovie(url: URL, mtime: Date?) {
+        if url == loadedMovieURL && mtime == loadedMovieMtime { return }
 
-        teardownMovie()
-        guard let url = found else { return }
-
-        guard !failedMovies.contains(url) else { return }
+        // Keep the previous layer alive until the new player renders its first frame
+        // so switching states never flashes invisible.
+        promoteMovieToOutgoing()
 
         let item = AVPlayerItem(url: url)
         let player = AVQueuePlayer()
         player.isMuted = true
+        player.preventsDisplaySleepDuringVideoPlayback = false
         let looper = AVPlayerLooper(player: player, templateItem: item)
 
         let layer = AVPlayerLayer(player: player)
@@ -269,17 +360,28 @@ final class PetView: NSView {
         layer.backgroundColor = NSColor.clear.cgColor
         layer.isOpaque = false
         layer.frame = petRect
+        layer.opacity = outgoingLayer == nil ? 1 : 0
         self.layer?.addSublayer(layer)
 
+        readyObservation = layer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] observed, _ in
+            guard observed.isReadyForDisplay else { return }
+            DispatchQueue.main.async {
+                guard let self, self.movieLayer === observed else { return }
+                observed.opacity = 1
+                self.teardownOutgoingMovie()
+            }
+        }
+
         // A clip can be present and still unplayable (truncated download, a codec
-        // this Mac has no decoder for). Say so and let the drawn cat take over.
+        // this Mac has no decoder for). Say so and let fallback take over.
         itemObservation = item.observe(\.status) { [weak self] item, _ in
             guard item.status == .failed else { return }
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self, self.loadedMovieURL == url else { return }
                 self.onLog?("cannot play \(url.lastPathComponent): \(item.error?.localizedDescription ?? "unknown")")
                 self.failedMovies.insert(url)
                 self.teardownMovie()
+                self.loadAsset()
                 self.needsDisplay = true
             }
         }
@@ -288,45 +390,81 @@ final class PetView: NSView {
         movieLooper = looper
         movieLayer = layer
         loadedMovieURL = url
+        loadedMovieMtime = mtime
+        stalledReports = 0
+        lastMovieTime = -1
         player.play()
         onLog?("movie \(url.lastPathComponent) at \(layer.frame.size)")
     }
 
+    private func promoteMovieToOutgoing() {
+        teardownOutgoingMovie()
+        itemObservation = nil
+        readyObservation = nil
+        outgoingPlayer = moviePlayer
+        outgoingLooper = movieLooper
+        outgoingLayer = movieLayer
+        moviePlayer = nil
+        movieLooper = nil
+        movieLayer = nil
+        loadedMovieURL = nil
+        loadedMovieMtime = nil
+    }
+
+    private func teardownOutgoingMovie() {
+        outgoingPlayer?.pause()
+        outgoingLayer?.removeFromSuperlayer()
+        outgoingPlayer = nil
+        outgoingLooper = nil
+        outgoingLayer = nil
+    }
+
     private func teardownMovie() {
         itemObservation = nil
+        readyObservation = nil
+        teardownOutgoingMovie()
         moviePlayer?.pause()
         movieLayer?.removeFromSuperlayer()
         moviePlayer = nil
         movieLooper = nil
         movieLayer = nil
         loadedMovieURL = nil
-        startTicking()
+        loadedMovieMtime = nil
     }
 
     override func layout() {
         super.layout()
         movieLayer?.frame = petRect
+        outgoingLayer?.frame = petRect
     }
 
-    private func loadFrames() {
-        frames = []
+    private func loadFrames(from dir: URL, mtime: Date?) {
         frameIndex = 0
+        lastFrameSwap = CACurrentMediaTime()
 
-        guard let dir = assetRoots.map({ $0.appendingPathComponent(petState.rawValue) })
-            .first(where: { FileManager.default.fileExists(atPath: $0.path) }),
-              let files = try? FileManager.default.contentsOfDirectory(
-                at: dir,
-                includingPropertiesForKeys: nil
-              ) else { return }
+        if let cached = framesCache[dir], cached.mtime == mtime {
+            frames = cached.images
+            return
+        }
+
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: nil
+        ) else {
+            frames = []
+            return
+        }
 
         let pngs = files
             .filter { $0.pathExtension.lowercased() == "png" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
 
-        frames = pngs.compactMap { url in
+        let decoded: [CGImage] = pngs.compactMap { url in
             guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
             return CGImageSourceCreateImageAtIndex(src, 0, nil)
         }
+        framesCache[dir] = (mtime: mtime, images: decoded)
+        frames = decoded
     }
 
     // MARK: - Mouse
@@ -338,11 +476,10 @@ final class PetView: NSView {
         return hitRegion.contains(local)
     }
 
-    /// Screen-space rect the reply panel should dock to.
+    /// Screen-space rect of the pet itself, used to dock the reply panel above or below it.
     var screenAnchor: NSRect {
         guard let window else { return .zero }
-        let origin = window.convertPoint(toScreen: NSPoint(x: petRect.midX, y: petRect.maxY))
-        return NSRect(x: origin.x - 1, y: origin.y, width: 2, height: 1)
+        return window.convertToScreen(convert(petRect, to: nil))
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {

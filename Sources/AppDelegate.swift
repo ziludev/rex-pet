@@ -22,8 +22,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var demoItem: NSMenuItem?
     private var clickThroughItem: NSMenuItem?
     private var stateMenuItem: NSMenuItem?
+    private var revealMenuItem: NSMenuItem?
+    private var replyMenuItem: NSMenuItem?
     /// How long a manually written state file outranks the event stream.
     private static let overrideTTL: TimeInterval = 60
+    private static let manualPickTTL: TimeInterval = 15
+    private var manualStateUntil: Date?
+    private var bubbleGeneration = 0
     private var clickThrough = (UserDefaults.standard.object(forKey: "clickThrough") as? Bool) ?? true
     private var demoMode = UserDefaults.standard.bool(forKey: "demoMode")
     private var demoIndex = 0
@@ -77,17 +82,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleWatchUpdate(_ update: RexWatcher.Update) {
         lastEventAt = Date()
         debugLog("event \(update.state.rawValue) block=\(update.blockID ?? "-")")
+        if update.state != .idle {
+            manualStateUntil = nil
+        }
         machine.apply(update)
         // A fresh state file outranks the stream, here too: applying the stream
         // directly is what made the pet flip between two states every event.
         guard !applyFileOverride() else { return }
+        guard manualStateUntil == nil else { return }
         syncFromMachine()
     }
 
     private func syncFromMachine() {
         let snapshot = machine.snapshot()
-        if let block = snapshot.blockID { context.blockID = block }
-        if let title = snapshot.title { context.title = title }
+        context.blockID = snapshot.blockID
+        context.title = snapshot.title
+        updateActionMenuItems()
         guard snapshot.state != context.state else { return }
         apply(snapshot.state)
     }
@@ -157,15 +167,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// pass-through is driven by polling the cursor: `NSEvent.mouseLocation` needs
     /// no Accessibility grant, unlike a CGEventTap or key-event monitor.
     private func installClickThroughMonitor() {
-        let timer = Timer(timeInterval: 1.0 / 20.0, repeats: true) { [weak self] _ in
-            self?.updateClickThrough()
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        cursorTimer = timer
+        syncClickThroughMonitor()
+    }
 
-        // Immediate reaction while the pointer is already over the pet.
-        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] _ in
-            self?.updateClickThrough()
+    private func syncClickThroughMonitor() {
+        if clickThrough {
+            if cursorTimer == nil {
+                let timer = Timer(timeInterval: 1.0 / 20.0, repeats: true) { [weak self] _ in
+                    self?.updateClickThrough()
+                }
+                timer.tolerance = 0.01
+                RunLoop.main.add(timer, forMode: .common)
+                cursorTimer = timer
+            }
+            if mouseMonitor == nil {
+                // Immediate reaction while the pointer is already over the pet.
+                mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] _ in
+                    self?.updateClickThrough()
+                }
+            }
+            updateClickThrough()
+        } else {
+            cursorTimer?.invalidate()
+            cursorTimer = nil
+            if let mouseMonitor {
+                NSEvent.removeMonitor(mouseMonitor)
+                self.mouseMonitor = nil
+            }
+            panel.ignoresMouseEvents = false
         }
     }
 
@@ -248,17 +277,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let revealItem = NSMenuItem(title: L10n.t("Show the pane in Rex", "在 Rex 中定位当前分屏"), action: #selector(revealPane), keyEquivalent: "")
         revealItem.target = self
-        revealItem.isEnabled = context.blockID != nil
+        revealMenuItem = revealItem
         menu.addItem(revealItem)
 
         let replyItem = NSMenuItem(title: L10n.t("Reply to the blocked pane…", "回复阻塞分屏…"), action: #selector(replyBlocked), keyEquivalent: "")
         replyItem.target = self
+        replyMenuItem = replyItem
         menu.addItem(replyItem)
+
+        menu.addItem(.separator())
+
+        let reloadAssetsItem = NSMenuItem(title: L10n.t("Reload pet assets", "重新加载宠物资源"), action: #selector(reloadAssets), keyEquivalent: "")
+        reloadAssetsItem.target = self
+        menu.addItem(reloadAssetsItem)
+
+        let openAssetsItem = NSMenuItem(title: L10n.t("Open Assets folder…", "打开资源文件夹…"), action: #selector(openAssetsFolder), keyEquivalent: "")
+        openAssetsItem.target = self
+        menu.addItem(openAssetsItem)
 
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: L10n.t("Quit", "退出"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
         statusItem.menu = menu
+        updateActionMenuItems()
+    }
+
+    private func updateActionMenuItems() {
+        revealMenuItem?.isEnabled = context.blockID != nil
+        replyMenuItem?.isEnabled = context.state == .blocked && context.blockID != nil
     }
 
     private func showMenu() {
@@ -272,6 +318,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         demoMode = false
         UserDefaults.standard.set(false, forKey: "demoMode")
         demoItem?.state = .off
+        if state == .idle {
+            manualStateUntil = nil
+            machine.reset()
+            context.blockID = nil
+            context.title = nil
+        } else {
+            manualStateUntil = Date().addingTimeInterval(Self.manualPickTTL)
+        }
         apply(state)
     }
 
@@ -279,8 +333,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         demoMode.toggle()
         UserDefaults.standard.set(demoMode, forKey: "demoMode")
         demoItem?.state = demoMode ? .on : .off
+        manualStateUntil = nil
         lastDemoSwap = 0
-        if !demoMode { apply(PetContext.load().state) }
+        if !demoMode {
+            if !applyFileOverride() {
+                syncFromMachine()
+                if context.state != .idle && machine.snapshot().state == .idle {
+                    apply(.idle)
+                }
+            }
+        }
+    }
+
+    @objc private func reloadAssets() {
+        petView.reloadAssets()
+        showBubble(L10n.t("Assets reloaded", "已重新加载资源"), seconds: 1.5)
+    }
+
+    @objc private func openAssetsFolder() {
+        let dir = URL(fileURLWithPath: ("~/Library/Application Support/rex-pet/Assets" as NSString).expandingTildeInPath)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(dir)
     }
 
     @objc private func reconnectWatch() {
@@ -316,7 +389,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.allowsMultipleSelection = false
         panel.message = L10n.t("Choose the rex command line binary", "选择 rex 命令行可执行文件")
         panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support/com.superlogical.rex")
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         guard panel.runModal() == .OK, let url = panel.url else { return }
         UserDefaults.standard.set(url.path, forKey: RexBridge.binPathDefaultsKey)
         debugLog("rex path set to \(url.path)")
@@ -329,7 +402,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clickThrough.toggle()
         UserDefaults.standard.set(clickThrough, forKey: "clickThrough")
         clickThroughItem?.state = clickThrough ? .on : .off
-        updateClickThrough(forceInteractive: true)
+        syncClickThroughMonitor()
     }
 
     @objc private func resetPosition() {
@@ -355,7 +428,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func activateRex() {
         guard let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "com.superlogical.rex" }) else { return }
-        app.activate(options: [.activateIgnoringOtherApps])
+        app.activate()
     }
 
     @objc private func replyBlocked() {
@@ -372,6 +445,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.poll()
         }
+        timer.tolerance = 0.1
         RunLoop.main.add(timer, forMode: .common)
         pollTimer = timer
         poll()
@@ -401,7 +475,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func applyFileOverride() -> Bool {
         guard let mtime = stateFileMTime(), Date().timeIntervalSince(mtime) < Self.overrideTTL else { return false }
         let loaded = PetContext.load()
-        if loaded.state != context.state || loaded.blockID != context.blockID {
+        if loaded.state != context.state || loaded.blockID != context.blockID || loaded.title != context.title {
             context.blockID = loaded.blockID
             context.title = loaded.title
             machine.reset()
@@ -423,12 +497,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// TTL expiry runs on the poll tick: `done`/`error`/`working` all fall back
     /// to idle here once nothing refreshed them.
     private func expireStaleStates() {
+        if let until = manualStateUntil {
+            if Date() < until { return }
+            manualStateUntil = nil
+        }
         syncFromMachine()
     }
 
     private func apply(_ state: PetState) {
         context.state = state
         petView.petState = state
+        updateActionMenuItems()
         if let stateMenu = stateMenuItem?.submenu {
             for item in stateMenu.items {
                 item.state = (item.representedObject as? String) == state.rawValue ? .on : .off
@@ -468,7 +547,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.debugLog("send result ok=\(ok) err=\(errorText ?? "-")")
             if ok {
                 self.showBubble(L10n.t("Sent", "已发送"), seconds: 1.5)
-                self.apply(.working)
+                self.machine.apply(RexWatcher.Update(state: .working, blockID: block, title: self.context.title))
+                self.syncFromMachine()
             } else {
                 self.showBubble(L10n.t("Send failed: ", "发送失败：") + (errorText ?? L10n.t("unknown error", "未知错误")), seconds: 4)
             }
@@ -481,9 +561,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showBubble(_ text: String, seconds: TimeInterval = 3) {
+        bubbleGeneration &+= 1
+        let gen = bubbleGeneration
         petView.bubbleText = text
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
-            guard let self, self.petView.bubbleText == text else { return }
+            guard let self, self.bubbleGeneration == gen else { return }
             self.petView.bubbleText = nil
         }
     }

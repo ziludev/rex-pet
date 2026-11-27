@@ -36,7 +36,11 @@ final class RexWatcher {
     var onLog: ((String) -> Void)?
 
     private var process: Process?
+    private var outHandle: FileHandle?
+    private var errHandle: FileHandle?
+    private let parseQueue = DispatchQueue(label: "dev.zilu.rexpet.watcher.parse")
     private var buffer = Data()
+    private let maxBufferedBytes = 1_048_576
     private var retryDelay: TimeInterval = 2
     private var restartWorkItem: DispatchWorkItem?
     private var stopped = false
@@ -53,8 +57,13 @@ final class RexWatcher {
         stopped = true
         restartWorkItem?.cancel()
         restartWorkItem = nil
+        outHandle?.readabilityHandler = nil
+        errHandle?.readabilityHandler = nil
+        outHandle = nil
+        errHandle = nil
         process?.terminate()
         process = nil
+        parseQueue.async { [weak self] in self?.buffer.removeAll() }
         setStatus(.stopped)
     }
 
@@ -83,22 +92,30 @@ final class RexWatcher {
         let err = Pipe()
         task.standardOutput = out
         task.standardError = err
+        outHandle = out.fileHandleForReading
+        errHandle = err.fileHandleForReading
 
         out.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let chunk = handle.availableData
             guard !chunk.isEmpty else { return }
-            self?.ingest(chunk)
+            self?.parseQueue.async { [weak self] in self?.ingest(chunk) }
         }
         err.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let chunk = handle.availableData
             guard !chunk.isEmpty, let text = String(data: chunk, encoding: .utf8) else { return }
-            self?.onLog?("stderr: \(text.trimmingCharacters(in: .whitespacesAndNewlines))")
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            DispatchQueue.main.async { [weak self] in self?.onLog?("stderr: \(trimmed)") }
         }
         task.terminationHandler = { [weak self] finished in
             DispatchQueue.main.async {
                 guard let self else { return }
                 out.fileHandleForReading.readabilityHandler = nil
                 err.fileHandleForReading.readabilityHandler = nil
+                // Ignore stale terminations from an earlier process replaced by restart().
+                guard self.process === finished else { return }
+                self.outHandle = nil
+                self.errHandle = nil
                 self.process = nil
                 guard !self.stopped else { return }
                 self.onLog?("rex events exited, status=\(finished.terminationStatus), reconnecting in \(Int(self.retryDelay))s")
@@ -114,8 +131,12 @@ final class RexWatcher {
             process = task
             setStatus(.running)
             retryDelay = 2
-            buffer.removeAll()
+            parseQueue.async { [weak self] in self?.buffer.removeAll() }
         } catch {
+            outHandle?.readabilityHandler = nil
+            errHandle?.readabilityHandler = nil
+            outHandle = nil
+            errHandle = nil
             setStatus(.stopped)
             onLog?("could not start rex events: \(error.localizedDescription)")
             scheduleRetry(after: 10)
@@ -146,31 +167,36 @@ final class RexWatcher {
             let line = buffer[buffer.startIndex..<newline]
             buffer.removeSubrange(buffer.startIndex...newline)
             guard !line.isEmpty else { continue }
-            handle(line: Data(line))
+            if let update = Self.parse(line: Data(line)) {
+                DispatchQueue.main.async { [weak self] in self?.onUpdate?(update) }
+            }
+        }
+        // Guard against unbounded memory growth on malformed streams with no newlines.
+        if buffer.count > maxBufferedBytes {
+            buffer.removeAll(keepingCapacity: false)
         }
     }
 
-    private func handle(line: Data) {
-        guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { return }
+    static func parse(line: Data) -> Update? {
+        guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { return nil }
         guard object["type"] as? String == "session_event",
               let payload = object["payload"] as? [String: Any],
-              let inner = payload["event"] as? [String: Any] else { return }
+              let inner = payload["event"] as? [String: Any] else { return nil }
 
         let innerType = inner["type"] as? String
 
         if innerType == "block_closed",
            let blockPayload = inner["payload"] as? [String: Any],
            let closed = blockPayload["block_id"] as? String {
-            emit(.idle, blockID: closed, title: nil)
-            return
+            return Update(state: .idle, blockID: closed, title: nil)
         }
 
         guard innerType == "block_event",
-              let blockPayload = inner["payload"] as? [String: Any] else { return }
+              let blockPayload = inner["payload"] as? [String: Any] else { return nil }
 
         // Only the terminal's own blocks speak the vocabulary we care about.
         if let creator = blockPayload["creator_name"] as? String, creator != "com.superlogical.terminal" {
-            return
+            return nil
         }
 
         let blockID = blockPayload["block_id"] as? String
@@ -180,33 +206,34 @@ final class RexWatcher {
         switch name {
         case "progress_report":
             guard let raw = detail["state"] as? String,
-                  let state = progressState(raw) else { return }
-            emit(state, blockID: blockID, title: detail["title"] as? String)
+                  let state = progressState(raw) else { return nil }
+            let title = (detail["title"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            return Update(state: state, blockID: blockID, title: title)
 
         case "program_status_changed":
             guard let record = detail["record"] as? [String: Any],
                   let raw = record["state"] as? String,
-                  let state = PetState(rawValue: raw.lowercased()) else { return }
+                  let state = PetState(rawValue: raw.lowercased()) else { return nil }
             let title = (record["title"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 ?? (record["msg"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            emit(state, blockID: blockID, title: title)
+            return Update(state: state, blockID: blockID, title: title)
 
         case "bell":
             // A bell means the terminal wants the human: treat it as blocked.
-            emit(.blocked, blockID: blockID, title: L10n.t("a terminal is waiting", "终端在等你"))
+            return Update(state: .blocked, blockID: blockID, title: L10n.t("a terminal is waiting", "终端在等你"))
 
         case "child_exited":
             let code = detail["exit_code"] as? Int ?? 0
-            emit(code == 0 ? .done : .error, blockID: blockID, title: nil)
+            return Update(state: code == 0 ? .done : .error, blockID: blockID, title: nil)
 
         default:
-            break
+            return nil
         }
     }
 
     /// Shells mostly report progress instead of program status: the vocabulary is
     /// spinner-oriented, so it needs its own mapping.
-    private func progressState(_ raw: String) -> PetState? {
+    private static func progressState(_ raw: String) -> PetState? {
         let value = raw.lowercased()
         if value.contains("block") || value.contains("need") || value.contains("wait") || value.contains("prompt") {
             return .blocked
@@ -221,10 +248,5 @@ final class RexWatcher {
             return .idle
         }
         return .working
-    }
-
-    private func emit(_ state: PetState, blockID: String?, title: String?) {
-        let update = Update(state: state, blockID: blockID, title: title)
-        DispatchQueue.main.async { [weak self] in self?.onUpdate?(update) }
     }
 }

@@ -2,7 +2,7 @@ import AppKit
 
 /// Small HUD that types a reply into the blocked pane through `rex block call write`.
 /// It becomes key so text input works; the previously frontmost app is restored on close.
-final class ReplyPanel: NSPanel, NSTextFieldDelegate {
+final class ReplyPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
     var onSend: ((String) -> Void)?
     var onClose: (() -> Void)?
 
@@ -10,8 +10,9 @@ final class ReplyPanel: NSPanel, NSTextFieldDelegate {
     private let promptLabel = NSTextField(labelWithString: "")
     private let field = NSTextField()
     private var previousApp: NSRunningApplication?
+    private var isDismissing = false
 
-    private static let panelSize = NSSize(width: 340, height: 132)
+    static let panelSize = NSSize(width: 340, height: 132)
 
     init() {
         super.init(
@@ -27,6 +28,7 @@ final class ReplyPanel: NSPanel, NSTextFieldDelegate {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         hidesOnDeactivate = false
         isReleasedWhenClosed = false
+        delegate = self
         buildContent()
     }
 
@@ -39,6 +41,16 @@ final class ReplyPanel: NSPanel, NSTextFieldDelegate {
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 { dismiss(); return }
         super.keyDown(with: event)
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        guard isVisible, !isDismissing else { return }
+        // User clicked another window/app: close cleanly without stealing focus back.
+        isDismissing = true
+        orderOut(nil)
+        previousApp = nil
+        isDismissing = false
+        onClose?()
     }
 
     // MARK: - Content
@@ -101,6 +113,22 @@ final class ReplyPanel: NSPanel, NSTextFieldDelegate {
 
     // MARK: - Presentation
 
+    /// Places the reply HUD above `anchor` when space permits, flipping below it if near the top edge.
+    static func placementOrigin(near anchor: NSRect, in visibleFrame: NSRect) -> NSPoint {
+        let size = panelSize
+        let x = min(max(anchor.midX - size.width / 2, visibleFrame.minX + 8),
+                    visibleFrame.maxX - size.width - 8)
+        let aboveY = anchor.maxY + 8
+        let y: CGFloat
+        if aboveY + size.height <= visibleFrame.maxY - 8 {
+            y = aboveY
+        } else {
+            let belowY = anchor.minY - size.height - 8
+            y = belowY >= visibleFrame.minY + 8 ? belowY : min(aboveY, visibleFrame.maxY - size.height - 8)
+        }
+        return NSPoint(x: x, y: max(visibleFrame.minY + 8, y))
+    }
+
     func present(blockID: String, title: String?, near anchor: NSRect) {
         targetBlock = blockID
         let short = blockID.count > 14 ? String(blockID.suffix(10)) : blockID
@@ -108,23 +136,24 @@ final class ReplyPanel: NSPanel, NSTextFieldDelegate {
         field.stringValue = ""
 
         previousApp = NSWorkspace.shared.frontmostApplication
-        var origin = NSPoint(x: anchor.midX - ReplyPanel.panelSize.width / 2, y: anchor.maxY + 8)
-        if let screen = NSScreen.main?.visibleFrame {
-            origin.x = min(max(origin.x, screen.minX + 8), screen.maxX - ReplyPanel.panelSize.width - 8)
-            origin.y = min(origin.y, screen.maxY - ReplyPanel.panelSize.height - 8)
-        }
+        let screen = NSScreen.screens.first { $0.frame.intersects(anchor) } ?? NSScreen.main ?? NSScreen.screens.first
+        let origin = screen.map { Self.placementOrigin(near: anchor, in: $0.visibleFrame) }
+            ?? NSPoint(x: anchor.midX - Self.panelSize.width / 2, y: anchor.maxY + 8)
         setFrameOrigin(origin)
 
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         makeKeyAndOrderFront(nil)
         makeFirstResponder(field)
     }
 
     func dismiss() {
+        guard !isDismissing else { return }
+        isDismissing = true
         orderOut(nil)
         // Hand focus back to whatever the user was working in.
         previousApp?.activate()
         previousApp = nil
+        isDismissing = false
         onClose?()
     }
 

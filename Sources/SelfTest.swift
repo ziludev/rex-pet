@@ -1,18 +1,17 @@
 import AppKit
 
-/// Headless checks for the parts that are pure logic: state aggregation and the
-/// language switch. Run with `RexPet --selftest`; exit code 0 means all passed.
-///
-/// These exist because the interesting bugs in this app have all been about
-/// *when* a state stops being true — a shell emits `idle` right after `done`,
-/// several panes disagree, and a dropped stream must not leave the cat amber
-/// forever. None of that needs a window on screen.
+/// Headless checks for the parts that are pure logic: state aggregation, event
+/// parsing, asset priority, reply placement, and the language switch.
+/// Run with `RexPet --selftest`; exit code 0 means all passed.
 enum SelfTest {
     private static var failures = 0
     private static var checks = 0
 
     static func run() -> Int32 {
         stateMachine()
+        watcherParsing()
+        assetResolution()
+        replyPlacement()
         replies()
         language()
         print("\(checks - failures)/\(checks) checks passed")
@@ -35,6 +34,13 @@ enum SelfTest {
         // ...but not forever.
         expect(machine.snapshot(now: start + 12).state == .idle, "done expires after its TTL")
 
+        // Error also survives immediate idle and expires after stickyTTL.
+        machine.reset()
+        machine.apply(update(.error, "block:a"), now: start)
+        machine.apply(update(.idle, "block:a"), now: start + 0.2)
+        expect(machine.snapshot(now: start + 0.3).state == .error, "error survives an immediate idle")
+        expect(machine.snapshot(now: start + 9).state == .idle, "error expires after its TTL")
+
         // A progress report from the same pane must not steal the check mark either.
         machine.reset()
         machine.apply(update(.done, "block:a"), now: start)
@@ -42,6 +48,12 @@ enum SelfTest {
         expect(machine.snapshot(now: start + 0.6).state == .done, "working inside the quiet window does not override done")
         machine.apply(update(.working, "block:a"), now: start + 3)
         expect(machine.snapshot(now: start + 3.1).state == .working, "working applies once the quiet window passes")
+
+        // Answering a blocked pane must switch back to working immediately, even inside quietWindow.
+        machine.reset()
+        machine.apply(update(.blocked, "block:a"), now: start)
+        machine.apply(update(.working, "block:a"), now: start + 0.4)
+        expect(machine.snapshot(now: start + 0.5).state == .working, "blocked switches to working immediately without waiting for quiet window")
 
         // Working alone expires: a pane that dies without saying goodbye.
         machine.reset()
@@ -81,7 +93,125 @@ enum SelfTest {
         RexWatcher.Update(state: state, blockID: blockID, title: nil)
     }
 
-    // MARK: - Language
+    // MARK: - Event parsing
+
+    private static func watcherParsing() {
+        func line(_ obj: [String: Any]) -> Data {
+            (try? JSONSerialization.data(withJSONObject: obj)) ?? Data()
+        }
+        func blockEvent(name: String, blockID: String = "block:1", creator: String = "com.superlogical.terminal", payload: [String: Any]) -> Data {
+            line([
+                "type": "session_event",
+                "payload": [
+                    "event": [
+                        "type": "block_event",
+                        "payload": [
+                            "block_id": blockID,
+                            "creator_name": creator,
+                            "name": name,
+                            "payload": payload,
+                        ],
+                    ],
+                ],
+            ])
+        }
+
+        let prog = RexWatcher.parse(line: blockEvent(name: "progress_report", payload: ["state": "running", "title": ""]))
+        expect(prog?.state == .working && prog?.blockID == "block:1" && prog?.title == nil,
+               "progress_report normalizes empty title and maps running to working")
+
+        let waiting = RexWatcher.parse(line: blockEvent(name: "progress_report", payload: ["state": "waiting_input", "title": "codex"]))
+        expect(waiting?.state == .blocked && waiting?.title == "codex",
+               "progress_report maps waiting to blocked and keeps title")
+
+        let status = RexWatcher.parse(line: blockEvent(name: "program_status_changed", payload: ["record": ["state": "done", "msg": "ok"]]))
+        expect(status?.state == .done && status?.title == "ok",
+               "program_status_changed reads state and msg fallback")
+
+        let bell = RexWatcher.parse(line: blockEvent(name: "bell", payload: [:]))
+        expect(bell?.state == .blocked && bell?.blockID == "block:1",
+               "bell maps to blocked")
+
+        let exitErr = RexWatcher.parse(line: blockEvent(name: "child_exited", payload: ["exit_code": 2]))
+        expect(exitErr?.state == .error, "non-zero child_exited maps to error")
+
+        let nonTerm = RexWatcher.parse(line: blockEvent(name: "bell", creator: "com.example.other", payload: [:]))
+        expect(nonTerm == nil, "non-terminal creator events are ignored")
+
+        let closed = RexWatcher.parse(line: line([
+            "type": "session_event",
+            "payload": ["event": ["type": "block_closed", "payload": ["block_id": "block:9"]]],
+        ]))
+        expect(closed?.state == .idle && closed?.blockID == "block:9", "block_closed clears pane to idle")
+
+        expect(RexWatcher.parse(line: Data("not-json".utf8)) == nil, "malformed event line is safely ignored")
+    }
+
+    // MARK: - Asset resolution
+
+    private static func assetResolution() {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent("rex-pet-selftest-\(UUID().uuidString)")
+        let userRoot = tmp.appendingPathComponent("user")
+        let bundledRoot = tmp.appendingPathComponent("bundled")
+        defer { try? fm.removeItem(at: tmp) }
+
+        do {
+            try fm.createDirectory(at: userRoot.appendingPathComponent("idle"), withIntermediateDirectories: true)
+            try fm.createDirectory(at: bundledRoot, withIntermediateDirectories: true)
+            try Data().write(to: userRoot.appendingPathComponent("idle/001.png"))
+            try Data().write(to: bundledRoot.appendingPathComponent("idle.mov"))
+
+            // User PNG folder must beat bundled .mov.
+            let res1 = PetView.resolveAsset(for: .idle, in: [userRoot, bundledRoot])
+            if case .frames(let dir, _) = res1 {
+                expect(dir.standardizedFileURL == userRoot.appendingPathComponent("idle").standardizedFileURL,
+                       "user PNG directory takes precedence over bundled mov")
+            } else {
+                expect(false, "user PNG directory takes precedence over bundled mov")
+            }
+
+            // Within the same root, .mov beats PNG folder.
+            let userMov = userRoot.appendingPathComponent("idle.mov")
+            try Data().write(to: userMov)
+            let res2 = PetView.resolveAsset(for: .idle, in: [userRoot, bundledRoot])
+            if case .movie(let url, _) = res2 {
+                expect(url.standardizedFileURL == userMov.standardizedFileURL,
+                       "mov beats PNG folder within the same root")
+            } else {
+                expect(false, "mov beats PNG folder within the same root")
+            }
+
+            // A failed .mov falls back to PNG frames in the same root instead of staying stuck.
+            let res3 = PetView.resolveAsset(for: .idle, in: [userRoot, bundledRoot], failedMovies: [userMov])
+            if case .frames = res3 {
+                expect(true, "failed mov falls back to PNG frames")
+            } else {
+                expect(false, "failed mov falls back to PNG frames")
+            }
+
+            // Missing state resolves to vector fallback.
+            let res4 = PetView.resolveAsset(for: .error, in: [userRoot, bundledRoot])
+            expect(res4 == .vector, "missing asset falls back to vector cat")
+        } catch {
+            expect(false, "asset resolution setup failed: \(error)")
+        }
+    }
+
+    // MARK: - Reply HUD placement
+
+    private static func replyPlacement() {
+        let screen = NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let normalPet = NSRect(x: 1200, y: 80, width: 180, height: 180)
+        let normalOrigin = ReplyPanel.placementOrigin(near: normalPet, in: screen)
+        expect(normalOrigin.y >= normalPet.maxY, "reply panel opens above pet when space allows")
+        expect(normalOrigin.x + ReplyPanel.panelSize.width <= screen.maxX - 8, "reply panel clamps to right edge")
+
+        let topPet = NSRect(x: 10, y: 710, width: 180, height: 180)
+        let topOrigin = ReplyPanel.placementOrigin(near: topPet, in: screen)
+        expect(topOrigin.y + ReplyPanel.panelSize.height <= topPet.minY, "reply panel flips below pet near top edge")
+        expect(topOrigin.x >= screen.minX + 8, "reply panel clamps to left edge")
+    }
 
     // MARK: - What a click actually sends
 
@@ -100,6 +230,8 @@ enum SelfTest {
             .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: String] }
         expect(decoded?["data"] == awkward, "a typed answer with quotes round-trips through the CLI payload")
     }
+
+    // MARK: - Language
 
     private static func language() {
         // Forced by the environment, which is what the screenshots rely on.
